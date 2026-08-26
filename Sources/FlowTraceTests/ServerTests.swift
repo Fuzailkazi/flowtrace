@@ -146,3 +146,41 @@ func runServerTests() {
         expectEqual(server.route(request("GET", "/nope", token: token)).status, 404)
     }
 }
+
+/// A wildcard CORS header on the unauthenticated /health route let any web page
+/// the user visited silently detect that FlowTrace was installed, and which
+/// version. Only browser extensions get a CORS header now.
+func runCORSTests() {
+    TestKit.suite("Local endpoint — cross-origin access")
+
+    func serialized(origin: String?) -> String {
+        let request = LocalServer.Request(
+            method: "GET", path: "/health", origin: origin
+        )
+        _ = request
+        return String(decoding: HTTP.serialize(.ok, origin: origin), as: UTF8.self)
+    }
+
+    TestKit.test("an ordinary web page gets no CORS header, so it can't fingerprint us") {
+        let response = serialized(origin: "https://evil.example")
+        expectNotContains(response, "Access-Control-Allow-Origin")
+    }
+
+    TestKit.test("a browser extension is allowed, and echoed exactly") {
+        let response = serialized(origin: "chrome-extension://abcdef")
+        expectContains(response, "Access-Control-Allow-Origin: chrome-extension://abcdef")
+        expectContains(response, "Vary: Origin")
+    }
+
+    TestKit.test("no wildcard is ever emitted") {
+        for origin in [nil, "https://evil.example", "chrome-extension://x", "null"] {
+            expectNotContains(serialized(origin: origin), "Allow-Origin: *")
+        }
+    }
+
+    TestKit.test("Origin is parsed off the request") {
+        let raw = "GET /health HTTP/1.1\r\nOrigin: chrome-extension://xyz\r\n\r\n"
+        let parsed = try unwrap(HTTP.parse(Data(raw.utf8)))
+        expectEqual(parsed.origin, "chrome-extension://xyz")
+    }
+}

@@ -44,11 +44,27 @@ public enum HTTP {
 
         return LocalServer.Request(
             method: method, path: path, query: query, body: body,
-            authorization: headers["authorization"]
+            authorization: headers["authorization"],
+            origin: headers["origin"]
         )
     }
 
-    public static func serialize(_ response: LocalServer.Response) -> Data {
+    /// Origins allowed to read a response.
+    ///
+    /// Only browser extensions get a CORS header. A wildcard let any web page the
+    /// user visited read `/health` — which is unauthenticated — and silently learn
+    /// that FlowTrace is installed, and which version. Without the header the
+    /// browser blocks the read, so an ordinary page cannot fingerprint the app.
+    static func allowedOrigin(_ origin: String?) -> String? {
+        guard let origin else { return nil }
+        let extensionSchemes = ["chrome-extension://", "moz-extension://", "safari-web-extension://"]
+        return extensionSchemes.contains(where: origin.hasPrefix) ? origin : nil
+    }
+
+    public static func serialize(
+        _ response: LocalServer.Response,
+        origin: String? = nil
+    ) -> Data {
         let body: Data
         if let json = response.json,
            let encoded = try? JSONSerialization.data(withJSONObject: json) {
@@ -60,10 +76,12 @@ public enum HTTP {
         var head = "HTTP/1.1 \(response.status) \(reason(response.status))\r\n"
         head += "Content-Type: application/json\r\n"
         head += "Content-Length: \(body.count)\r\n"
-        // The extension is a different origin; nothing here is a browser-credentialed
-        // endpoint, and the bearer token is what actually gates access.
-        head += "Access-Control-Allow-Origin: *\r\n"
-        head += "Access-Control-Allow-Headers: authorization, content-type\r\n"
+        // Extensions only — never a wildcard. See `allowedOrigin`.
+        if let allowed = allowedOrigin(origin) {
+            head += "Access-Control-Allow-Origin: \(allowed)\r\n"
+            head += "Access-Control-Allow-Headers: authorization, content-type\r\n"
+            head += "Vary: Origin\r\n"
+        }
         head += "Connection: close\r\n\r\n"
 
         var out = Data(head.utf8)

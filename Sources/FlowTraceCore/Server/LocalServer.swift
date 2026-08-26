@@ -12,13 +12,14 @@ public final class LocalServer {
     public struct Request {
         public init(
             method: String, path: String, query: [String: String] = [:],
-            body: Data = Data(), authorization: String? = nil
+            body: Data = Data(), authorization: String? = nil, origin: String? = nil
         ) {
             self.method = method
             self.path = path
             self.query = query
             self.body = body
             self.authorization = authorization
+            self.origin = origin
         }
 
         public var method: String
@@ -26,6 +27,9 @@ public final class LocalServer {
         public var query: [String: String]
         public var body: Data
         public var authorization: String?
+        /// Present when the caller is a browser. Only extension origins are
+        /// echoed back in the CORS header.
+        public var origin: String?
     }
 
     public struct Response {
@@ -157,7 +161,7 @@ public final class LocalServer {
             defer { close(client) }
             guard let self, let request = Self.readRequest(from: client) else { return }
             let response = self.route(request)
-            let payload = HTTP.serialize(response)
+            let payload = HTTP.serialize(response, origin: request.origin)
             payload.withUnsafeBytes { buffer in
                 guard let base = buffer.baseAddress else { return }
                 var sent = 0

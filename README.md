@@ -57,7 +57,11 @@ is already full the first time you open it.
 
 FlowTrace is local software. It has no server to talk to.
 
-- **No network requests.** None. There is no API client in the codebase.
+- **FlowTrace never sends anything anywhere.** There is no HTTP client in the
+  codebase — no telemetry, no crash reporting, no model API. It does *listen* on
+  `127.0.0.1` when you switch the browser-extension endpoint on, so that the
+  extension and CLI can hand it captures; that socket is bound to loopback, is off
+  by default, and every route but `/health` requires a bearer token.
 - **No account, no sync, no telemetry.**
 - **Nothing is scanned until you say so.** First run lists the exact directories
   it wants to read and reads nothing until you tick them.

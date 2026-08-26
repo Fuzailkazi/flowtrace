@@ -12,6 +12,7 @@ runDetectorTests()
 runSummaryTests()
 runBrowserTests()
 runServerTests()
+runCORSTests()
 
 
 TestKit.summarize()
