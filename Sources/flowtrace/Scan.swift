@@ -87,7 +87,7 @@ struct Scan: ParsableCommand {
             if let prompt = evidence.lastPrompt, !prompt.isEmpty {
                 print("  \(Term.dim("last asked:")) \(prompt)")
             }
-            print("  \(Term.dim(displayPath(evidence.repositoryPath)))")
+            print("  \(Term.dim(evidence.repositoryPath.abbreviatingHome))")
             print("")
         }
 
@@ -97,8 +97,4 @@ struct Scan: ParsableCommand {
         }
     }
 
-    private func displayPath(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
 }

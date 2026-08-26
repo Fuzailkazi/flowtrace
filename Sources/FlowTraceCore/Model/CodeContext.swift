@@ -67,12 +67,7 @@ public struct CodeContext: Codable, Identifiable, Hashable, Sendable {
     }
 
     /// Path with the home directory abbreviated, for display.
-    public var displayPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return repositoryPath.hasPrefix(home)
-            ? "~" + repositoryPath.dropFirst(home.count)
-            : repositoryPath
-    }
+    public var displayPath: String { repositoryPath.abbreviatingHome }
 }
 
 extension CodeContext: FetchableRecord, MutablePersistableRecord {

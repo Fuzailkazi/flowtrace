@@ -31,25 +31,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
             else { continue }
             files.append(contentsOf: entries.filter { $0.pathExtension == "jsonl" }.map(\.path))
         }
-        return Self.parseConcurrently(files) { parse(file: $0, cache: cache) }
-    }
-
-    /// Parses transcripts in parallel — a first scan reads hundreds of files and
-    /// this is where nearly all of its time goes.
-    static func parseConcurrently(
-        _ paths: [String],
-        _ body: @escaping (String) -> AgentSession?
-    ) -> [AgentSession] {
-        guard !paths.isEmpty else { return [] }
-        var results: [AgentSession] = []
-        let lock = NSLock()
-        DispatchQueue.concurrentPerform(iterations: paths.count) { index in
-            guard let session = body(paths[index]) else { return }
-            lock.lock()
-            results.append(session)
-            lock.unlock()
-        }
-        return results
+        return ConcurrentParse.sessions(in: files) { parse(file: $0, cache: cache) }
     }
 
     func parse(file path: String, cache: SessionCache?) -> AgentSession? {

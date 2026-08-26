@@ -120,7 +120,7 @@ struct OnboardingView: View {
                         if !available { Chip(text: "not installed", color: .secondary) }
                     }
                     ForEach(paths, id: \.self) { path in
-                        Text(abbreviate(path))
+                        Text(path.abbreviatingHome)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.tertiary)
                     }
@@ -240,8 +240,4 @@ struct OnboardingView: View {
         dismiss()
     }
 
-    private func abbreviate(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
 }

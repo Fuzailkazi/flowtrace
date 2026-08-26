@@ -64,7 +64,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: Theme.Space.xs) {
                             ForEach(ignored, id: \.self) { path in
                                 HStack {
-                                    Text(abbreviate(path))
+                                    Text(path.abbreviatingHome)
                                         .font(.system(size: 11, design: .monospaced))
                                         .lineLimit(1).truncationMode(.head)
                                     Spacer()
@@ -95,7 +95,7 @@ struct SettingsView: View {
                         if !adapter.isAvailable { Chip(text: "not installed", color: .secondary) }
                     }
                     ForEach(adapter.searchPaths, id: \.self) { path in
-                        Text(abbreviate(path))
+                        Text(path.abbreviatingHome)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.tertiary)
                     }
@@ -309,8 +309,4 @@ struct SettingsView: View {
         reload()
     }
 
-    private func abbreviate(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
 }

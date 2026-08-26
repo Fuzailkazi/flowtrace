@@ -3,40 +3,76 @@ import FlowTraceCore
 
 @main
 struct FlowTraceApp: App {
-    @State private var model: AppModel
-    @State private var startupError: String?
+    /// The database is the whole app. If it can't be opened there is no model to
+    /// build, so that is a state the UI renders rather than a placeholder model
+    /// standing in for one.
+    private enum Launch {
+        case ready(AppModel)
+        case failed(String)
+
+        var model: AppModel? {
+            if case .ready(let model) = self { return model }
+            return nil
+        }
+    }
+
+    @State private var launch: Launch
 
     init() {
         do {
-            let store = try Store()
-            _model = State(initialValue: AppModel(store: store))
+            _launch = State(initialValue: .ready(AppModel(store: try Store())))
         } catch {
-            // The database is the whole app; if it can't open, say so plainly
-            // rather than launching into a window that silently does nothing.
-            _model = State(initialValue: AppModel(store: try! Store(
-                database: try! FlowTraceDatabase.inMemory()
-            )))
-            _startupError = State(initialValue: error.localizedDescription)
+            _launch = State(initialValue: .failed(error.localizedDescription))
         }
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model, startupError: startupError)
-                .frame(minWidth: 900, minHeight: 560)
+            Group {
+                switch launch {
+                case .ready(let model):
+                    RootView(model: model)
+                case .failed(let message):
+                    DatabaseUnavailableView(message: message)
+                }
+            }
+            .frame(minWidth: 900, minHeight: 560)
         }
         .defaultSize(width: 1120, height: 720)
-        .commands { FlowTraceCommands(model: model) }
+        .commands { FlowTraceCommands(model: launch.model) }
 
         MenuBarExtra("FlowTrace", systemImage: "point.3.filled.connected.trianglepath.dotted") {
-            MenuBarContent(model: model)
+            if let model = launch.model {
+                MenuBarContent(model: model)
+            } else {
+                Button("Quit FlowTrace") { NSApplication.shared.terminate(nil) }
+            }
         }
         .menuBarExtraStyle(.window)
 
         Settings {
-            SettingsView(model: model)
-                .frame(width: 560, height: 520)
+            if let model = launch.model {
+                SettingsView(model: model).frame(width: 560, height: 520)
+            }
         }
+    }
+}
+
+/// Shown instead of the main window when the database can't be opened, with the
+/// one thing the user can actually act on: where the file is.
+struct DatabaseUnavailableView: View {
+    let message: String
+
+    var body: some View {
+        EmptyState(
+            icon: "externaldrive.badge.exclamationmark",
+            title: "FlowTrace couldn't open its database",
+            message: "\(message)\n\n\(FlowTraceDatabase.defaultURL.path.abbreviatingHome)",
+            actionLabel: "Reveal in Finder",
+            action: {
+                NSWorkspace.shared.activateFileViewerSelecting([FlowTraceDatabase.defaultURL])
+            }
+        )
     }
 }
 
@@ -44,18 +80,11 @@ struct FlowTraceApp: App {
 
 struct RootView: View {
     @Bindable var model: AppModel
-    var startupError: String?
     @State private var hotKey: GlobalHotKey?
 
     var body: some View {
         Group {
-            if let startupError {
-                EmptyState(
-                    icon: "externaldrive.badge.exclamationmark",
-                    title: "FlowTrace couldn't open its database",
-                    message: startupError
-                )
-            } else if model.isLoading {
+            if model.isLoading {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -72,7 +101,7 @@ struct RootView: View {
                 model.route = .thread(requested)
             }
         }
-        .sheet(isPresented: .constant(!model.consent.hasCompletedOnboarding && startupError == nil)) {
+        .sheet(isPresented: .constant(!model.consent.hasCompletedOnboarding)) {
             OnboardingView(model: model)
                 .frame(width: 640, height: 560)
                 .interactiveDismissDisabled()
@@ -189,7 +218,9 @@ extension Notification.Name {
 }
 
 struct FlowTraceCommands: Commands {
-    let model: AppModel
+    /// Absent when the database couldn't be opened; navigation commands are
+    /// disabled rather than hidden, so the menus stay where the user expects.
+    let model: AppModel?
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -205,18 +236,22 @@ struct FlowTraceCommands: Commands {
         }
 
         CommandMenu("Threads") {
-            Button("Dashboard") { model.route = .dashboard }
+            Button("Dashboard") { model?.route = .dashboard }
                 .keyboardShortcut("0", modifiers: .command)
-            Button("Active") { model.route = .status(.active) }
+                .disabled(model == nil)
+            Button("Active") { model?.route = .status(.active) }
                 .keyboardShortcut("1", modifiers: .command)
-            Button("Paused") { model.route = .status(.paused) }
+                .disabled(model == nil)
+            Button("Paused") { model?.route = .status(.paused) }
                 .keyboardShortcut("2", modifiers: .command)
-            Button("Completed") { model.route = .status(.completed) }
+                .disabled(model == nil)
+            Button("Completed") { model?.route = .status(.completed) }
                 .keyboardShortcut("3", modifiers: .command)
+                .disabled(model == nil)
             Divider()
-            Button("Scan for unfinished work") { model.scan() }
+            Button("Scan for unfinished work") { model?.scan() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(!model.consent.anyEnabled)
+                .disabled(!(model?.consent.anyEnabled ?? false))
         }
     }
 }

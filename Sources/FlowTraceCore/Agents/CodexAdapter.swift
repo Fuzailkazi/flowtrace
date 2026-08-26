@@ -39,7 +39,7 @@ public struct CodexAdapter: AgentAdapter {
             files.append(url.path)
         }
 
-        return ClaudeCodeAdapter.parseConcurrently(files) { path in
+        return ConcurrentParse.sessions(in: files) { path in
             guard var session = parse(file: path, cache: cache) else { return nil }
             if session.title == nil { session.title = titles[session.id] }
             return session

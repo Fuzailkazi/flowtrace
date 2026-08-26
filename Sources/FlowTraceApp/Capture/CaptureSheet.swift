@@ -22,21 +22,21 @@ struct CaptureSheet: View {
     @State private var newThreadTitle = ""
 
     // Tabs
-    @State private var browser: SupportedBrowser?
-    @State private var availableBrowsers: [SupportedBrowser] = []
-    @State private var tabs: [CapturedTab] = []
-    @State private var selected: Set<CapturedTab.ID> = []
-    @State private var tabNote = ""
-    @State private var readError: String?
-    @State private var recovery: String?
-    @State private var isReading = false
+    @State var browser: SupportedBrowser?
+    @State var availableBrowsers: [SupportedBrowser] = []
+    @State var tabs: [CapturedTab] = []
+    @State var selected: Set<CapturedTab.ID> = []
+    @State var tabNote = ""
+    @State var readError: String?
+    @State var recovery: String?
+    @State var isReading = false
 
     // Repository / session
-    @State private var repositoryPath = ""
-    @State private var gitState: GitState?
-    @State private var contextNote = ""
-    @State private var contextNextStep = ""
-    @State private var agent: AgentName?
+    @State var repositoryPath = ""
+    @State var gitState: GitState?
+    @State var contextNote = ""
+    @State var contextNextStep = ""
+    @State var agent: AgentName?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -82,174 +82,6 @@ struct CaptureSheet: View {
                 }
             }
             .padding(Theme.Space.l)
-        }
-    }
-
-    // MARK: - Tabs
-
-    @ViewBuilder
-    private var tabsSection: some View {
-        if availableBrowsers.isEmpty {
-            EmptyState(
-                icon: "safari",
-                title: "No supported browser is running",
-                message: "Open Chrome, Brave, Safari, Arc, Dia, Edge, Opera or Vivaldi and try again. "
-                    + "FlowTrace won't launch a browser just to read its tabs."
-            )
-        } else {
-            HStack(spacing: Theme.Space.s) {
-                Picker("", selection: Binding(
-                    get: { browser ?? availableBrowsers[0] },
-                    set: { browser = $0; readTabs(activeOnly: false) }
-                )) {
-                    ForEach(availableBrowsers) { Text($0.name).tag($0) }
-                }
-                .labelsHidden()
-                .frame(width: 180)
-
-                Button("Front window") { readTabs(activeOnly: false) }
-                Button("Current tab only") { readTabs(activeOnly: true) }
-                Spacer()
-                if isReading { ProgressView().controlSize(.small) }
-            }
-            .controlSize(.small)
-
-            if let readError {
-                Card {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Label(readError, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12)).foregroundStyle(.orange)
-                        if let recovery {
-                            Text(recovery).font(.system(size: 11)).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-
-            if !tabs.isEmpty {
-                HStack {
-                    Text("FlowTrace stores the title and URL only — never page contents or cookies.")
-                        .font(.system(size: 11)).foregroundStyle(.tertiary)
-                    Spacer()
-                    Button(selected.count == tabs.count ? "Deselect all" : "Select all") {
-                        selected = selected.count == tabs.count ? [] : Set(tabs.map(\.id))
-                    }
-                    .buttonStyle(.link).font(.system(size: 11))
-                }
-
-                Card {
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        ForEach(tabs) { tab in
-                            HStack(alignment: .top, spacing: Theme.Space.s) {
-                                Toggle("", isOn: Binding(
-                                    get: { selected.contains(tab.id) },
-                                    set: { on in
-                                        if on { selected.insert(tab.id) } else { selected.remove(tab.id) }
-                                    }
-                                ))
-                                .labelsHidden()
-                                VStack(alignment: .leading, spacing: 1) {
-                                    HStack(spacing: Theme.Space.xs) {
-                                        Text(tab.pageTitle).font(.system(size: 12)).lineLimit(1)
-                                        if tab.isActive { Chip(text: "current", color: .blue) }
-                                    }
-                                    Text(tab.url)
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(.tertiary)
-                                        .lineLimit(1)
-                                        .textSelection(.enabled)
-                                }
-                                Spacer()
-                            }
-                        }
-                    }
-                }
-
-                LabeledField("Why did you open these?", text: $tabNote, axis: .vertical)
-            }
-        }
-    }
-
-    // MARK: - Repository
-
-    private var repositorySection: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack {
-                Button("Choose folder…") { pickFolder() }
-                if !repositoryPath.isEmpty {
-                    Text(repositoryPath).font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
-                }
-                Spacer()
-            }
-            .controlSize(.small)
-
-            if let gitState {
-                Card {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: Theme.Space.xs) {
-                            Text(gitState.repositoryName).font(.system(size: 13, weight: .medium))
-                            Chip(text: gitState.branch, color: .blue)
-                            if gitState.dirtyFileCount > 0 {
-                                Chip(text: "\(gitState.dirtyFileCount) uncommitted", color: .orange)
-                            }
-                            if gitState.commitsAhead > 0 {
-                                Chip(text: "\(gitState.commitsAhead) unpushed", color: .orange)
-                            }
-                        }
-                        if let sha = gitState.headSha {
-                            Text("HEAD \(sha.prefix(7)) · \(gitState.daysSinceLastCommit)d since last commit")
-                                .font(.system(size: 11)).foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-            } else if !repositoryPath.isEmpty {
-                Card {
-                    Label("That folder isn't inside a git repository.", systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 12)).foregroundStyle(.orange)
-                }
-            }
-
-            agentPicker
-            LabeledField("Note", text: $contextNote, axis: .vertical)
-            LabeledField("What should you do next here?", text: $contextNextStep, axis: .vertical)
-        }
-    }
-
-    // MARK: - Manual agent session
-
-    private var sessionSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("For agents FlowTrace can't read automatically — Cursor, OpenCode, Gemini CLI "
-                 + "and anything else. Claude Code and Codex sessions are found by scanning.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-
-            HStack {
-                Button("Choose the repository…") { pickFolder() }
-                if let gitState {
-                    Text("\(gitState.repositoryName) · \(gitState.branch)")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .controlSize(.small)
-
-            agentPicker
-            LabeledField("What did you ask it to do?", text: $contextNote, axis: .vertical)
-            LabeledField("What's left?", text: $contextNextStep, axis: .vertical)
-        }
-    }
-
-    private var agentPicker: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            FieldLabel(text: "Agent")
-            Picker("", selection: $agent) {
-                Text("None").tag(AgentName?.none)
-                ForEach(AgentName.allCases, id: \.self) { Text($0.label).tag(AgentName?.some($0)) }
-            }
-            .labelsHidden()
-            .frame(width: 200)
-            .controlSize(.small)
         }
     }
 
@@ -299,7 +131,7 @@ struct CaptureSheet: View {
 
     // MARK: - Actions
 
-    private func readTabs(activeOnly: Bool) {
+    func readTabs(activeOnly: Bool) {
         guard let browser else { return }
         isReading = true
         readError = nil
@@ -329,7 +161,7 @@ struct CaptureSheet: View {
         }
     }
 
-    private func pickFolder() {
+    func pickFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -386,45 +218,3 @@ struct CaptureSheet: View {
     }
 }
 
-/// Creating a thread by hand — title, why, and what's next.
-struct NewThreadSheet: View {
-    @Bindable var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var title = ""
-    @State private var intent = ""
-    @State private var nextStep = ""
-    @State private var priority: Priority = .medium
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
-            Text("New work thread").font(.system(size: 15, weight: .semibold))
-
-            LabeledField("Title", text: $title)
-            LabeledField("Why am I doing this?", text: $intent, axis: .vertical)
-            LabeledField("What should I do next?", text: $nextStep, axis: .vertical)
-
-            VStack(alignment: .leading, spacing: 3) {
-                FieldLabel(text: "Priority")
-                Picker("", selection: $priority) {
-                    ForEach(Priority.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 240)
-            }
-
-            Spacer()
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Create") {
-                    model.create(title: title, intent: intent, nextStep: nextStep, priority: priority)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding(Theme.Space.xl)
-        .frame(width: 480, height: 420)
-    }
-}

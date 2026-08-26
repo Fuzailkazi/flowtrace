@@ -165,7 +165,7 @@ struct ProposalCard: View {
                                 .lineLimit(3)
                         }
                     }
-                    Text(displayPath(evidence.repositoryPath))
+                    Text(evidence.repositoryPath.abbreviatingHome)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -204,10 +204,6 @@ struct ProposalCard: View {
         }
     }
 
-    private func displayPath(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-    }
 }
 
 struct LabeledField: View {
