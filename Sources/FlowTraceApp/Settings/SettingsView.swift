@@ -8,6 +8,10 @@ struct SettingsView: View {
     @State private var counts: [String: Int] = [:]
     @State private var confirmingDeleteAll = false
     @State private var ignored: [String] = []
+    @State private var accessibilityGranted = AccessibilityPermission.isGranted
+    /// The permission is granted in System Settings, outside this app, so poll
+    /// while the pane is open rather than making the user relaunch.
+    private let permissionTick = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ScrollView {
@@ -23,6 +27,13 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .task { reload() }
+        .onReceive(permissionTick) { _ in
+            let granted = AccessibilityPermission.isGranted
+            guard granted != accessibilityGranted else { return }
+            accessibilityGranted = granted
+            // Re-arm the trigger the moment permission appears.
+            model.reregisterTrigger()
+        }
         .confirmationDialog(
             "Delete everything FlowTrace has stored?",
             isPresented: $confirmingDeleteAll,
@@ -111,37 +122,139 @@ struct SettingsView: View {
 
     private var shortcutSection: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionHeader(title: "Shortcut", subtitle: "works anywhere, no permission needed")
+            SectionHeader(title: "Shortcut", subtitle: "opens the \"why am I here?\" panel")
             Card {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    HStack(alignment: .top, spacing: Theme.Space.m) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Why am I here?")
-                                .font(.system(size: 12, weight: .medium))
-                            Text("Opens a small panel over whatever you're doing, "
-                                 + "so you can note why you're there without leaving it.")
-                                .font(.system(size: 11)).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer()
-                        ShortcutRecorder(shortcut: Binding(
-                            get: { model.captureShortcut },
-                            set: { model.captureShortcut = $0 }
-                        ))
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    Picker("", selection: triggerKind) {
+                        Text("Key combination").tag(TriggerKind.chord)
+                        Text("Tap a modifier").tag(TriggerKind.tap)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    switch model.captureTrigger {
+                    case .chord:
+                        chordControls
+                    case .modifierTap(let key, let taps):
+                        tapControls(key: key, taps: taps)
                     }
 
                     if let failure = model.shortcutFailure {
                         Label(failure, systemImage: "exclamationmark.triangle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(.orange)
-                    } else {
-                        Text("Spotlight, Raycast and Alfred commonly hold ⌥Space — "
-                             + "if nothing happens, pick another combination.")
-                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
         }
+    }
+
+    private enum TriggerKind { case chord, tap }
+
+    private var triggerKind: Binding<TriggerKind> {
+        Binding(
+            get: {
+                if case .modifierTap = model.captureTrigger { return .tap }
+                return .chord
+            },
+            set: { kind in
+                switch kind {
+                case .chord:
+                    model.captureTrigger = .chord(model.lastChord)
+                case .tap:
+                    model.captureTrigger = .modifierTap(key: .leftOption, taps: 1)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var chordControls: some View {
+        HStack(alignment: .top, spacing: Theme.Space.m) {
+            Text("Needs no permission and can't fire by accident.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            ShortcutRecorder(shortcut: Binding(
+                get: { model.lastChord },
+                set: {
+                    model.lastChord = $0
+                    model.captureTrigger = .chord($0)
+                }
+            ))
+        }
+    }
+
+    @ViewBuilder
+    private func tapControls(key: ModifierKey, taps: Int) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Picker("", selection: Binding(
+                    get: { key },
+                    set: { model.captureTrigger = .modifierTap(key: $0, taps: taps) }
+                )) {
+                    ForEach(ModifierKey.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 130)
+
+                Picker("", selection: Binding(
+                    get: { taps },
+                    set: { model.captureTrigger = .modifierTap(key: key, taps: $0) }
+                )) {
+                    Text("Single tap").tag(1)
+                    Text("Double tap").tag(2)
+                }
+                .labelsHidden()
+                .frame(width: 130)
+                Spacer()
+            }
+            .controlSize(.small)
+
+            if taps == 1 {
+                Text("A single tap of a key you also use as a modifier will "
+                     + "sometimes fire when you didn't mean it. Double tap is far "
+                     + "steadier if that starts to annoy you.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            accessibilityRow
+        }
+    }
+
+    /// Tapping a modifier means watching keys pressed in other apps, which is
+    /// precisely what Accessibility gates. Say so, and make it one click.
+    @ViewBuilder
+    private var accessibilityRow: some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: accessibilityGranted ? "checkmark.circle.fill" : "lock.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(accessibilityGranted ? .green : .orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(accessibilityGranted
+                     ? "Accessibility granted"
+                     : "Needs the Accessibility permission")
+                    .font(.system(size: 12, weight: .medium))
+                Text(accessibilityGranted
+                     ? "Because this build isn't signed with a Developer ID, macOS "
+                       + "may ask again after an update."
+                     : "macOS only lets an app watch keys pressed elsewhere with "
+                       + "your explicit permission.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            if !accessibilityGranted {
+                Button("Grant…") {
+                    AccessibilityPermission.request()
+                    AccessibilityPermission.openSettings()
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.top, Theme.Space.xs)
     }
 
     // MARK: - Browser extension

@@ -95,12 +95,25 @@ final class AppModel {
     var serverPort: UInt16?
     var serverError: String?
 
-    /// The shortcut that opens the quick-capture panel. Changing it re-registers
-    /// the global hotkey; `shortcutFailure` says so when the system refuses.
-    var captureShortcut = HotKeyShortcut.load() {
-        didSet { captureShortcut.save() }
+    /// How the quick-capture panel is summoned. Changing it re-registers the
+    /// trigger immediately; `shortcutFailure` says so when the system refuses.
+    var captureTrigger = CaptureTrigger.load() {
+        didSet { captureTrigger.save() }
     }
     var shortcutFailure: String?
+
+    /// Bumped to force the trigger to re-register when nothing about it changed
+    /// but the world did — notably when Accessibility is granted while the app
+    /// is already running.
+    var triggerReloadToken = 0
+
+    func reregisterTrigger() { triggerReloadToken += 1 }
+
+    /// The chord to use if the user switches back from a modifier tap, so the
+    /// recorder doesn't forget what they had set.
+    var lastChord = HotKeyShortcut.load() {
+        didSet { lastChord.save() }
+    }
 
     var localServerEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "flowtrace.localServer") }

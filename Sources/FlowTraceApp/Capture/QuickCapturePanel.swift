@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import FlowTraceCore
 
 /// A small floating panel that appears over whatever you're doing.
 ///
@@ -60,6 +61,7 @@ final class QuickCaptureController {
 
     /// Snapshots where the user is, then shows the panel over it.
     func toggle() {
+        Diagnostics.log("quick-capture toggle (visible: \(panel?.isVisible ?? false))")
         if let panel, panel.isVisible {
             dismiss()
             return
@@ -81,15 +83,30 @@ final class QuickCaptureController {
 
         let panel = QuickCapturePanel(content: hosting)
         panel.positionOverActiveScreen()
-        panel.orderFrontRegardless()
-        panel.makeKey()
         self.panel = panel
+
+        // FlowTrace has a dock icon, so it is a "regular" app — and a regular
+        // app's window cannot take keyboard focus while another app is active,
+        // however floating the panel is. Without activating first, the panel
+        // appears but refuses to accept a single keystroke.
+        //
+        // Activating shows the panel only: the main window is never ordered
+        // front, and focus is handed straight back on dismiss.
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+
+        Diagnostics.log(
+            "panel shown over \(snapshot.appName) — key: \(panel.isKeyWindow)"
+        )
     }
 
     func dismiss(returningTo app: NSRunningApplication? = nil) {
         panel?.orderOut(nil)
         panel = nil
         // Hand focus back to whatever the user was actually doing.
-        app?.activate()
+        if let app {
+            app.activate()
+            Diagnostics.log("focus returned to \(app.localizedName ?? "previous app")")
+        }
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import FlowTraceCore
 
 /// A system-wide keyboard shortcut.
 ///
@@ -42,6 +43,7 @@ final class GlobalHotKey {
         let installStatus = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, _, _ in
+                Diagnostics.log("hotkey fired")
                 DispatchQueue.main.async { GlobalHotKey.action?() }
                 return noErr
             },

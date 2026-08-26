@@ -82,6 +82,7 @@ struct RootView: View {
     @Bindable var model: AppModel
     @State private var hotKey: GlobalHotKey?
     @State private var quickCapture: QuickCaptureController?
+    @State private var tapMonitor: ModifierTapMonitor?
 
     var body: some View {
         Group {
@@ -96,15 +97,19 @@ struct RootView: View {
             model.refresh()
             model.startServerIfEnabled()
             registerHotKey()
-        }
-        .onChange(of: model.captureShortcut) { _, updated in
-            guard let controller = quickCapture else { return }
-            registerShortcut(updated, controller: controller)
             // Lets `flowtrace resume <thread> --open` land straight on a thread.
             if let requested = ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_THREAD"],
                model.thread(id: requested) != nil {
                 model.route = .thread(requested)
             }
+        }
+        .onChange(of: model.captureTrigger) { _, updated in
+            guard let controller = quickCapture else { return }
+            registerTrigger(updated, controller: controller)
+        }
+        .onChange(of: model.triggerReloadToken) { _, _ in
+            guard let controller = quickCapture else { return }
+            registerTrigger(model.captureTrigger, controller: controller)
         }
         .sheet(isPresented: .constant(!model.consent.hasCompletedOnboarding)) {
             OnboardingView(model: model)
@@ -122,7 +127,7 @@ struct RootView: View {
         guard hotKey == nil else { return }
         let controller = QuickCaptureController(model: model)
         quickCapture = controller
-        registerShortcut(model.captureShortcut, controller: controller)
+        registerTrigger(model.captureTrigger, controller: controller)
 
         // Same panel, reachable from the menubar for anyone who hasn't learned
         // the shortcut yet.
@@ -133,17 +138,46 @@ struct RootView: View {
         }
     }
 
-    /// Claims a shortcut, replacing whatever was registered before, and reports
+    /// Claims the trigger, replacing whatever was registered before, and reports
     /// back whether the system accepted it.
-    private func registerShortcut(_ shortcut: HotKeyShortcut, controller: QuickCaptureController) {
-        // Releasing the old registration first — Carbon will not hand over a
-        // combination that is still claimed by this process.
+    private func registerTrigger(_ trigger: CaptureTrigger, controller: QuickCaptureController) {
+        // Release both mechanisms first: Carbon will not hand over a combination
+        // still claimed by this process, and a stale monitor would double-fire.
         hotKey = nil
-        let key = GlobalHotKey(shortcut: shortcut) {
-            Task { @MainActor in controller.toggle() }
+        tapMonitor?.stop()
+        tapMonitor = nil
+        model.shortcutFailure = nil
+
+        switch trigger {
+        case .chord(let shortcut):
+            let key = GlobalHotKey(shortcut: shortcut) {
+                Task { @MainActor in controller.toggle() }
+            }
+            hotKey = key
+            model.shortcutFailure = key.failure?.message
+            Diagnostics.log(
+                key.failure == nil
+                    ? "trigger \(trigger.displayString) registered"
+                    : "trigger \(trigger.displayString) FAILED — \(key.failure!.message)"
+            )
+
+        case .modifierTap(let modifier, let taps):
+            // Without Accessibility we cannot see keys pressed in other apps, so
+            // say that plainly rather than leaving a dead trigger.
+            guard AccessibilityPermission.isGranted else {
+                model.shortcutFailure =
+                    "Tapping a modifier needs the Accessibility permission. "
+                    + "Grant it below, then this starts working."
+                Diagnostics.log("trigger \(trigger.displayString) blocked — no Accessibility")
+                return
+            }
+            let monitor = ModifierTapMonitor(key: modifier, taps: taps) {
+                Task { @MainActor in controller.toggle() }
+            }
+            monitor.start()
+            tapMonitor = monitor
+            Diagnostics.log("trigger \(trigger.displayString) watching")
         }
-        hotKey = key
-        model.shortcutFailure = key.failure?.message
     }
 }
 
