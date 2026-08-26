@@ -134,6 +134,23 @@ enum Migrations {
             }
         }
 
+        // Records each brief shown and whether it beat what the user would have
+        // typed. The point of the whole surface is that this number is readable
+        // after a week — a product decision, not telemetry: it never leaves here.
+        migrator.registerMigration("v2.briefLog") { db in
+            try db.create(table: "briefLog") { t in
+                t.primaryKey("id", .text)
+                t.column("repositoryPath", .text).notNull()
+                t.column("repositoryName", .text).notNull()
+                t.column("estimatedTokens", .integer).notNull().defaults(to: 0)
+                t.column("shownAt", .datetime).notNull()
+                t.column("verdict", .text)
+                t.column("note", .text)
+                t.column("judgedAt", .datetime)
+            }
+            try db.create(index: "idx_brieflog_shown", on: "briefLog", columns: ["shownAt"])
+        }
+
         return migrator
     }
 }

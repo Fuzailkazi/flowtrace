@@ -98,9 +98,47 @@ xattr -dr com.apple.quarantine /Applications/FlowTrace.app
 To produce a distributable build, set `FLOWTRACE_SIGN_IDENTITY` to a Developer
 ID before running `bundle.sh`.
 
+## The brief
+
+The thing FlowTrace is actually for. Run it in any repository:
+
+```bash
+flowtrace brief
+```
+
+```
+You worked on refund 10 days ago, on branch main.
+That session was about: Run project on localhost.
+You left 15 uncommitted files (IntentTrace.jsx, intent.js, app.js), and 8 commits
+not yet pushed.
+Your last commit was "Expand support-mcp to 20 tools and stage policy ownership".
+
+The last things you asked an agent in this repository:
+  · If I have multiple agents, how would that work?
+  · run this project on localhost
+```
+
+Better still, have it appear on its own. `./Scripts/install-hook.sh` adds a
+`SessionStart` hook so the brief is handed to Claude Code whenever you start it in
+a repository you left something in — no shortcut to remember, no app to open.
+`./Scripts/uninstall-hook.sh` removes it.
+
+It stays quiet unless it has something to say: nothing if you were here in the
+last two hours, nothing if the tree is clean, nothing for scratch worktrees, and
+nothing for work old enough that it is over rather than paused. Credential-shaped
+strings are stripped from prompts before they reach the brief — it is going into
+an agent's context, so a leaked key would travel further than one sitting in a
+local file.
+
+Runs in about 80ms, because a repository's transcripts are found by directory name
+rather than by reading every transcript on the machine.
+
 ## CLI
 
 ```bash
+flowtrace brief                 # where you left this repository
+flowtrace verdict win|loss      # did the brief beat what you'd have typed?
+flowtrace verdict --report      # the tally
 flowtrace scan                  # find unfinished work
 flowtrace scan --cold-days 14   # only things untouched for two weeks
 flowtrace scan --json           # machine-readable

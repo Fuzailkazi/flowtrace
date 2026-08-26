@@ -22,6 +22,36 @@ public struct CodexAdapter: AgentAdapter {
 
     public var searchPaths: [String] { [sessionsRoot.path, indexFile.path] }
 
+    /// Codex stores rollouts by date, not by path, so there is no cheap way to
+    /// find one repository's sessions. Bounding by file age keeps a per-session
+    /// lookup fast without missing anything recent enough to matter.
+    public func discoverSessions(modifiedWithin days: Int,
+                                 cache: SessionCache? = nil) throws -> [AgentSession] {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        let titles = loadTitles()
+        let fm = FileManager.default
+        guard let walker = fm.enumerator(
+            at: sessionsRoot, includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var files: [String] = []
+        for case let url as URL in walker {
+            guard url.pathExtension == "jsonl",
+                  url.lastPathComponent.hasPrefix("rollout-"),
+                  let modified = FileMeta.stat(url.path)?.modifiedAt,
+                  modified >= cutoff
+            else { continue }
+            files.append(url.path)
+        }
+
+        return ConcurrentParse.sessions(in: files) { path in
+            guard var session = parse(file: path, cache: cache) else { return nil }
+            if session.title == nil { session.title = titles[session.id] }
+            return session
+        }
+    }
+
     public func discoverSessions(cache: SessionCache? = nil) throws -> [AgentSession] {
         let titles = loadTitles()
         let fm = FileManager.default

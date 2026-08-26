@@ -13,6 +13,7 @@ runSummaryTests()
 runBrowserTests()
 runServerTests()
 runCORSTests()
+runBriefTests()
 
 
 TestKit.summarize()

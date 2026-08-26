@@ -19,6 +19,44 @@ public struct ClaudeCodeAdapter: AgentAdapter {
 
     public var searchPaths: [String] { [root.path] }
 
+    /// Claude Code names each project directory after its working directory, with
+    /// `/` and `.` replaced by `-`. That lets a repository's transcripts be found
+    /// by directory name instead of reading every transcript on the machine —
+    /// which is the difference between 600ms and 20ms when this runs before every
+    /// agent session.
+    public static func projectSlug(for path: String) -> String {
+        FilePathCanon.canonical(path)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+    }
+
+    /// Sessions whose working directory was this repository, or anywhere inside it.
+    ///
+    /// Matching is on the exact slug or the slug followed by a separator — a plain
+    /// `hasPrefix` would make `~/armor/vid` swallow `~/armor/videos`.
+    public func discoverSessions(inRepository repositoryPath: String,
+                                 cache: SessionCache? = nil) throws -> [AgentSession] {
+        let slug = Self.projectSlug(for: repositoryPath)
+        let fm = FileManager.default
+        guard let directories = try? fm.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil
+        ) else { return [] }
+
+        let matching = directories.filter { url in
+            let name = url.lastPathComponent
+            return name == slug || name.hasPrefix(slug + "-")
+        }
+
+        var files: [String] = []
+        for directory in matching {
+            guard let entries = try? fm.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil
+            ) else { continue }
+            files.append(contentsOf: entries.filter { $0.pathExtension == "jsonl" }.map(\.path))
+        }
+        return ConcurrentParse.sessions(in: files) { parse(file: $0, cache: cache) }
+    }
+
     public func discoverSessions(cache: SessionCache? = nil) throws -> [AgentSession] {
         let fm = FileManager.default
         guard let projectDirs = try? fm.contentsOfDirectory(
