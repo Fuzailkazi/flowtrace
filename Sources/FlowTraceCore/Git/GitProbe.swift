@@ -11,6 +11,14 @@ public struct GitState: Hashable, Sendable {
     public var commitsAhead: Int
     public var commitsBehind: Int
 
+    /// The files you were actually editing, most-changed first.
+    ///
+    /// This is the single most recognisable thing about a paused piece of work —
+    /// "IntentTrace.jsx, intent.js" says what a file *count* never can.
+    public var changedFiles: [String]
+    /// Subject line of the last commit. Describes the work in your own words.
+    public var lastCommitSubject: String?
+
     public var daysSinceLastCommit: Int {
         guard let headDate else { return 0 }
         return max(0, Calendar.current.dateComponents([.day], from: headDate, to: Date()).day ?? 0)
@@ -67,20 +75,36 @@ public struct GitProbe: Sendable {
             : "HEAD"
 
         let status = Shell.run(gitPath, ["status", "--porcelain"], cwd: top)
-        let dirtyCount = status.ok
-            ? status.stdout.split(separator: "\n").filter { !$0.isEmpty }.count
-            : 0
+        let statusLines = status.ok
+            ? status.stdout.split(separator: "\n").filter { !$0.isEmpty }.map(String.init)
+            : []
+        let dirtyCount = statusLines.count
+        // Porcelain lines are "XY path"; keep the path, drop the status flags.
+        let changedFiles = statusLines.compactMap { line -> String? in
+            let trimmed = line.dropFirst(3)
+            guard !trimmed.isEmpty else { return nil }
+            // Renames appear as "old -> new"; the new name is what matters.
+            if let arrow = trimmed.range(of: " -> ") {
+                return String(trimmed[arrow.upperBound...])
+            }
+            return String(trimmed)
+        }
 
         var headSha: String?
         var headDate: Date?
-        let log = Shell.run(gitPath, ["log", "-1", "--format=%H%n%ct"], cwd: top)
+        var headSubject: String?
+        let log = Shell.run(gitPath, ["log", "-1", "--format=%H%n%ct%n%s"], cwd: top)
         if log.ok {
-            let lines = log.stdout.split(separator: "\n")
+            let lines = log.stdout.split(separator: "\n", omittingEmptySubsequences: false)
             if lines.count >= 2 {
                 headSha = String(lines[0])
                 if let seconds = TimeInterval(lines[1]) {
                     headDate = Date(timeIntervalSince1970: seconds)
                 }
+            }
+            if lines.count >= 3 {
+                let subject = String(lines[2]).trimmingCharacters(in: .whitespaces)
+                headSubject = subject.isEmpty ? nil : subject
             }
         }
 
@@ -94,7 +118,9 @@ public struct GitProbe: Sendable {
             headDate: headDate,
             dirtyFileCount: dirtyCount,
             commitsAhead: ahead,
-            commitsBehind: behind
+            commitsBehind: behind,
+            changedFiles: changedFiles,
+            lastCommitSubject: headSubject
         )
     }
 

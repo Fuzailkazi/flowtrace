@@ -17,6 +17,9 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
     /// The last prompt that actually said something. "do it" is a real last
     /// prompt but a useless next step, so the two are tracked separately.
     public var lastSubstantivePrompt: String?
+    /// The last few things you asked, oldest first. One prompt is a snapshot;
+    /// three is a story you can recognise.
+    public var recentPrompts: [String]
     public var startedAt: Date?
     public var lastActivityAt: Date?
     public var filePath: String
@@ -31,6 +34,7 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
         firstPrompt: String? = nil,
         lastPrompt: String? = nil,
         lastSubstantivePrompt: String? = nil,
+        recentPrompts: [String] = [],
         startedAt: Date? = nil,
         lastActivityAt: Date? = nil,
         filePath: String,
@@ -44,6 +48,7 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
         self.firstPrompt = firstPrompt
         self.lastPrompt = lastPrompt
         self.lastSubstantivePrompt = lastSubstantivePrompt
+        self.recentPrompts = recentPrompts
         self.startedAt = startedAt
         self.lastActivityAt = lastActivityAt
         self.filePath = filePath
@@ -69,12 +74,39 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
     ]
 
     public static func isSubstantive(_ text: String) -> Bool {
-        let normalized = text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed
             .lowercased()
             .trimmingCharacters(in: CharacterSet(charactersIn: ".!?"))
         if acknowledgements.contains(normalized) { return false }
-        return normalized.count >= 15
+        if normalized.count < 15 { return false }
+        return !startsWithDraggedPath(trimmed)
+    }
+
+    /// Dragging a screenshot into an agent pastes an absolute temp path as the
+    /// prompt. It is a real turn, but as a line of "what you were asking" it is
+    /// unreadable — and the useful part is whatever you typed after it.
+    static func startsWithDraggedPath(_ text: String) -> Bool {
+        let head = text.trimmingCharacters(in: CharacterSet(charactersIn: "'\"`"))
+        return head.hasPrefix("/var/folders/")
+            || head.hasPrefix("/private/var/folders/")
+            || head.hasPrefix("/tmp/")
+            || head.hasPrefix("file://")
+    }
+
+    /// Strips a leading dragged-file path so the sentence after it survives.
+    public static func withoutLeadingPath(_ text: String) -> String {
+        guard startsWithDraggedPath(text) else { return text }
+        let scalars = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The path ends at the closing quote, or the first whitespace after it.
+        if scalars.hasPrefix("'"), let end = scalars.dropFirst().firstIndex(of: "'") {
+            return String(scalars[scalars.index(after: end)...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let space = scalars.firstIndex(of: " ") {
+            return String(scalars[space...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ""
     }
 
     /// Collapse a prompt to one short line suitable for a title.

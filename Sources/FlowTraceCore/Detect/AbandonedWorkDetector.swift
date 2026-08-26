@@ -1,23 +1,57 @@
 import Foundation
 
 public struct DetectorConfig: Sendable {
-    /// How long a piece of work must sit untouched before it counts as cold.
-    public var coldDays: Int = 7
+    /// Work touched more recently than this is still in flight — you don't need
+    /// reminding about what you did yesterday.
+    public var coldDays: Int = 2
+
+    /// Past this, work isn't paused, it's over. Surfacing six-month-old repos
+    /// turns the list into a guilt pile nobody acts on.
+    public var deadDays: Int = 90
+
+    /// Where the value peaks: long enough to have lost the thread, recent enough
+    /// that you still care.
+    public var peakDays: Double = 10
+
     /// Ignore sessions older than this when attributing work to a repository.
     public var lookbackDays: Int = 240
     public var maxProposals: Int = 40
     public var minScore: Double = 1.0
 
+    /// Path fragments that mean "not a project of mine": agent scratch worktrees,
+    /// tutorials, temp checkouts. These generate transcripts and dirty files but
+    /// are never work you intend to resume.
+    public var noisePathFragments: [String] = [
+        "/conductor/workspaces/",
+        "/.worktrees/",
+        "/starter project/",
+        "/node_modules/",
+        "/private/var/folders/",
+        "/var/folders/",
+        "/.Trash/",
+    ]
+
     public init(
-        coldDays: Int = 7,
+        coldDays: Int = 2,
+        deadDays: Int = 90,
+        peakDays: Double = 10,
         lookbackDays: Int = 240,
         maxProposals: Int = 40,
-        minScore: Double = 1.0
+        minScore: Double = 1.0,
+        noisePathFragments: [String]? = nil
     ) {
         self.coldDays = coldDays
+        self.deadDays = deadDays
+        self.peakDays = peakDays
         self.lookbackDays = lookbackDays
         self.maxProposals = maxProposals
         self.minScore = minScore
+        if let noisePathFragments { self.noisePathFragments = noisePathFragments }
+    }
+
+    func isNoise(_ path: String) -> Bool {
+        let lowered = path.lowercased()
+        return noisePathFragments.contains { lowered.contains($0.lowercased()) }
     }
 }
 
@@ -168,17 +202,33 @@ public final class AbandonedWorkDetector {
             [.day], from: lastActivity, to: Date()
         ).day ?? 0)
 
-        // Something must actually be unfinished. A clean, pushed, cold repo is
-        // not abandoned work — it is finished work.
+        // Something must actually be unfinished. A clean, pushed repo is not
+        // paused work — it is finished work.
         let hasLooseEnds = state.isDirty || state.commitsAhead > 0
-        guard hasLooseEnds, daysCold >= config.coldDays else { return nil }
+        guard hasLooseEnds else { return nil }
 
-        var score = 0.0
-        score += min(Double(state.dirtyFileCount), 20) * 0.25
-        score += min(Double(daysCold) / 7.0, 6) * 0.6
-        score += min(Double(state.commitsAhead), 10) * 0.3
+        // Touched today? You haven't lost the thread yet. Untouched for months?
+        // You're not coming back, and saying so is just a reproach.
+        guard daysCold >= config.coldDays, daysCold <= config.deadDays else { return nil }
+        guard !config.isNoise(state.topLevel) else { return nil }
+
+        // A working tree dirty only with lockfiles and build output is not work
+        // left half-done — it is what `npm install` did on your way past. Without
+        // some other sign of intent, there is nothing here to resume.
+        let meaningfulEdits = state.changedFiles.filter { !DetectionEvidence.isGenerated($0) }
+        let onlyGeneratedEdits = state.dirtyFileCount > 0 && meaningfulEdits.isEmpty
+        let hasIntentSignal = !newest.recentPrompts.isEmpty || state.commitsAhead > 0
+        if onlyGeneratedEdits, !hasIntentSignal { return nil }
+
+        var score = Self.recencyScore(daysCold: daysCold, peak: config.peakDays)
+        if onlyGeneratedEdits { score -= 1.0 }
+        score += min(Double(meaningfulEdits.count), 20) * 0.15
+        score += min(Double(state.commitsAhead), 10) * 0.35
         score += min(Double(sessions.count), 5) * 0.2
-        if Self.looksUnfinished(newest.resumePrompt) { score += 1.0 }
+        if Self.looksUnfinished(newest.resumePrompt) { score += 0.75 }
+        // Work you can recognise at a glance is worth surfacing above work you can't.
+        if state.lastCommitSubject != nil { score += 0.25 }
+        if !newest.recentPrompts.isEmpty { score += 0.25 }
 
         guard score >= config.minScore else { return nil }
 
@@ -193,7 +243,15 @@ public final class AbandonedWorkDetector {
             sessionCount: sessions.count,
             agents: agents,
             lastPrompt: newest.resumePrompt.map { AgentSession.condense($0, limit: 240) },
-            lastSessionAt: newest.lastActivityAt
+            lastSessionAt: newest.lastActivityAt,
+            changedFiles: state.changedFiles,
+            lastCommitSubject: state.lastCommitSubject,
+            promptArc: newest.recentPrompts
+                .map(AgentSession.withoutLeadingPath)
+                .filter { $0.count >= 12 }
+                .suffix(3)
+                .map { AgentSession.condense($0, limit: 110) },
+            sessionTitle: ordered.last(where: { !($0.title ?? "").isEmpty })?.title
         )
 
         return ThreadProposal(
@@ -207,21 +265,26 @@ public final class AbandonedWorkDetector {
         )
     }
 
-    /// Prefer the title the agent wrote for itself — it describes the work better
-    /// than a repository name can. `ordered` is oldest-first; the most recent
-    /// session that has a title wins.
+    /// The repository is what you recognise; a session title is a transient task.
+    ///
+    /// An earlier version led with the agent's own title, which produced entries
+    /// like "Check current git branch" standing in for an entire product. The repo
+    /// name and branch identify the work; the session title describes what you were
+    /// doing inside it, and belongs underneath.
     static func title(for ordered: [AgentSession], state: GitState) -> String {
-        if let titled = ordered.last(where: { !($0.title ?? "").isEmpty }), let title = titled.title {
-            return "\(title) · \(state.repositoryName)"
-        }
-        // A long first prompt makes a bad title — fall back to the repository.
-        if let first = ordered.first?.firstPrompt, first.count <= 60 {
-            return AgentSession.condense(first, limit: 60)
-        }
         let branch = state.branch
         let isDefault = branch == "main" || branch == "master" || branch == "HEAD"
-        if isDefault || branch.count > 24 { return state.repositoryName }
+        if isDefault || branch.count > 28 { return state.repositoryName }
         return "\(state.repositoryName) · \(branch)"
+    }
+
+    /// Value peaks a week or two out: long enough to have lost the thread, recent
+    /// enough that you still care. A bell curve rather than the old linear ramp,
+    /// which rewarded staleness and pushed dead repos to the top.
+    static func recencyScore(daysCold: Int, peak: Double) -> Double {
+        let spread = 18.0
+        let offset = (Double(daysCold) - peak) / spread
+        return 3.0 * exp(-offset * offset)
     }
 
     /// Weak signal that the last instruction was mid-task. It only nudges the

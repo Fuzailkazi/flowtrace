@@ -68,6 +68,19 @@ final class TempRepo {
     }
 }
 
+/// Test repositories live under the temp directory, which the shipping config
+/// treats as noise. Tests that aren't about filtering opt out of it.
+func testConfig(
+    coldDays: Int = 2,
+    deadDays: Int = 90,
+    maxProposals: Int = 40
+) -> DetectorConfig {
+    DetectorConfig(
+        coldDays: coldDays, deadDays: deadDays,
+        maxProposals: maxProposals, noisePathFragments: []
+    )
+}
+
 /// Feeds the detector a fixed set of sessions, so scoring can be tested without
 /// depending on anything in the user's home directory.
 struct StubAdapter: AgentAdapter {
@@ -110,14 +123,17 @@ func runDetectorTests() {
                 session(cwd: repo.path, title: "Add Google OAuth", daysAgo: 30),
             ]),
         ])
-        let result = try detector.scan()
+        let result = try detector.scan(config: testConfig())
 
         expectEqual(result.proposals.count, 1, "proposals")
         let proposal = try unwrap(result.proposals.first)
         expectEqual(proposal.evidence.repositoryName, "acme")
         expectEqual(proposal.evidence.dirtyFileCount, 1)
         expect(proposal.evidence.daysSinceLastCommit >= 29, "days cold")
-        expectContains(proposal.suggestedTitle, "Add Google OAuth")
+        // The repository is the identity you recognise; the agent's session title
+        // describes what you were doing inside it and rides along as context.
+        expectEqual(proposal.suggestedTitle, "acme", "repo name is the title")
+        expectEqual(proposal.evidence.sessionTitle, "Add Google OAuth", "session title kept")
         expectEqual(proposal.suggestedNextStep, "now finish the thing")
     }
 
@@ -131,7 +147,7 @@ func runDetectorTests() {
         let detector = AbandonedWorkDetector(adapters: [
             StubAdapter(agent: .claudeCode, sessions: [session(cwd: repo.path, daysAgo: 200)]),
         ])
-        expectEqual(try detector.scan().proposals.count, 0, "proposals")
+        expectEqual(try detector.scan(config: testConfig()).proposals.count, 0, "proposals")
     }
 
     TestKit.test("work touched today is not abandoned yet") {
@@ -143,7 +159,7 @@ func runDetectorTests() {
         let detector = AbandonedWorkDetector(adapters: [
             StubAdapter(agent: .claudeCode, sessions: [session(cwd: repo.path, daysAgo: 0)]),
         ])
-        expectEqual(try detector.scan().proposals.count, 0, "proposals")
+        expectEqual(try detector.scan(config: testConfig()).proposals.count, 0, "proposals")
     }
 
     // The original probe of this machine reported 16 abandoned repositories, but
@@ -166,7 +182,7 @@ func runDetectorTests() {
                 session(cwd: repo.path, daysAgo: 36),
             ]),
         ])
-        let result = try detector.scan()
+        let result = try detector.scan(config: testConfig())
 
         expectEqual(result.proposals.count, 1, "one repository, one proposal")
         expectEqual(result.proposals.first?.evidence.sessionCount, 3, "all sessions credited")
@@ -180,7 +196,7 @@ func runDetectorTests() {
                 session(cwd: "/Users/dev/also-gone", daysAgo: 25),
             ]),
         ])
-        let result = try detector.scan()
+        let result = try detector.scan(config: testConfig())
         expectEqual(result.proposals.count, 0, "proposals")
         expectEqual(result.missingPaths, 2, "missing paths")
     }
@@ -197,24 +213,79 @@ func runDetectorTests() {
             adapters: [StubAdapter(agent: .claudeCode, sessions: [session(cwd: repo.path, daysAgo: 30)])],
             ignoredPaths: [repo.path]
         )
-        expectEqual(try detector.scan().proposals.count, 0, "proposals")
+        expectEqual(try detector.scan(config: testConfig()).proposals.count, 0, "proposals")
     }
 
-    TestKit.test("older, colder work outranks newer work") {
-        let old = try TempRepo(name: "old")
-        old.write("a.ts", "x"); old.commit("initial", daysAgo: 120); old.write("b.ts", "dirty")
+    // The original build ranked by staleness, which pushed six-month-old repos to
+    // the top — the least resumable work presented most prominently. Value peaks a
+    // week or two out: long enough to have lost the thread, recent enough to care.
+    TestKit.test("recent unfinished work outranks stale work") {
         let recent = try TempRepo(name: "recent")
         recent.write("a.ts", "x"); recent.commit("initial", daysAgo: 9); recent.write("b.ts", "dirty")
+        let stale = try TempRepo(name: "stale")
+        stale.write("a.ts", "x"); stale.commit("initial", daysAgo: 75); stale.write("b.ts", "dirty")
 
         let detector = AbandonedWorkDetector(adapters: [
             StubAdapter(agent: .claudeCode, sessions: [
-                session(cwd: old.path, daysAgo: 120),
                 session(cwd: recent.path, daysAgo: 9),
+                session(cwd: stale.path, daysAgo: 75),
             ]),
         ])
-        let proposals = try detector.scan().proposals
+        let proposals = try detector.scan(config: testConfig()).proposals
         expectEqual(proposals.count, 2, "proposals")
-        expectEqual(proposals.first?.evidence.repositoryName, "old", "highest scoring first")
+        expectEqual(proposals.first?.evidence.repositoryName, "recent", "recent work first")
+    }
+
+    // Past a few months it isn't paused, it's over. Listing it is a reproach, not
+    // a prompt to act.
+    TestKit.test("work older than the dead threshold is dropped entirely") {
+        let ancient = try TempRepo(name: "ancient")
+        ancient.write("a.ts", "x"); ancient.commit("initial", daysAgo: 200)
+        ancient.write("b.ts", "dirty")
+
+        let detector = AbandonedWorkDetector(adapters: [
+            StubAdapter(agent: .claudeCode, sessions: [session(cwd: ancient.path, daysAgo: 200)]),
+        ])
+        expectEqual(try detector.scan(config: testConfig()).proposals.count, 0, "proposals")
+    }
+
+    // A tree dirty only with lockfiles is what `npm install` left behind.
+    TestKit.test("a repository dirty only with generated files is not work") {
+        let repo = try TempRepo(name: "installed")
+        repo.write("src/main.ts", "x"); repo.commit("initial", daysAgo: 20)
+        repo.write("package-lock.json", "{}")
+
+        let detector = AbandonedWorkDetector(adapters: [
+            StubAdapter(agent: .claudeCode, sessions: [
+                session(cwd: repo.path, first: nil, last: nil, daysAgo: 20),
+            ]),
+        ])
+        expectEqual(try detector.scan(config: testConfig()).proposals.count, 0, "proposals")
+    }
+
+    // Agent orchestrators and tutorials generate transcripts and dirty files, but
+    // they are never work you intend to come back to.
+    TestKit.test("agent scratch worktrees are filtered out") {
+        let repo = try TempRepo(name: "scratch")
+        repo.write("a.ts", "x"); repo.commit("initial", daysAgo: 20); repo.write("b.ts", "dirty")
+
+        let detector = AbandonedWorkDetector(adapters: [
+            StubAdapter(agent: .codex, sessions: [session(cwd: repo.path, daysAgo: 20)]),
+        ])
+        // The temp directory stands in for any path fragment on the noise list.
+        let config = DetectorConfig(noisePathFragments: ["/var/folders/", "/private/var/folders/"])
+        expectEqual(try detector.scan(config: config).proposals.count, 0, "proposals")
+    }
+
+    TestKit.test("the changed files you recognise come before generated ones") {
+        let evidence = DetectionEvidence(
+            repositoryPath: "/tmp/x", repositoryName: "x", branch: "main",
+            dirtyFileCount: 3, daysSinceLastCommit: 5, unpushedCommitCount: 0,
+            sessionCount: 1, agents: [.claudeCode],
+            changedFiles: ["pnpm-lock.yaml", "src/IntentTrace.jsx", "dist/bundle.min.js"]
+        )
+        expectContains(evidence.fileSummary, "IntentTrace.jsx")
+        expectNotContains(evidence.fileSummary, "pnpm-lock.yaml")
     }
 
     TestKit.suite("Detector — proposals become threads")

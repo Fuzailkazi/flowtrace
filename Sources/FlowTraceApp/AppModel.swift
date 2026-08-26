@@ -113,6 +113,10 @@ final class AppModel {
         if localServerEnabled { startServer() }
     }
 
+    /// Brings up the capture endpoint off the main actor.
+    ///
+    /// Token lookup touches the keychain, which can be slow or fail outright on an
+    /// ad-hoc signed build. None of that is allowed to delay the window.
     private func startServer() {
         guard server == nil else { return }
         let server = LocalServer(store: store)
@@ -125,19 +129,20 @@ final class AppModel {
                 self?.serverPort = nil
             }
         }
-        do {
-            try server.start()
-            self.server = server
-            serverError = nil
-            // The port is assigned asynchronously once the listener is ready.
-            Task { @MainActor in
-                for _ in 0..<20 {
-                    try? await Task.sleep(for: .milliseconds(100))
-                    if let port = server.port { serverPort = port; return }
+        self.server = server
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                try server.start()
+                await MainActor.run { [weak self] in
+                    self?.serverError = nil
+                    self?.serverPort = server.port
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.serverError = error.localizedDescription
+                    self?.server = nil
                 }
             }
-        } catch {
-            serverError = error.localizedDescription
         }
     }
 

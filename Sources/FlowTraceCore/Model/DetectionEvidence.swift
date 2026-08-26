@@ -23,6 +23,16 @@ public struct DetectionEvidence: Codable, Hashable, Sendable {
     public var lastSessionAt: Date?
     public var scoredAt: Date
 
+    /// The files you were editing. More recognisable than any count.
+    public var changedFiles: [String]
+    /// Your own description of the last thing that landed.
+    public var lastCommitSubject: String?
+    /// The last few things you asked here, oldest first.
+    public var promptArc: [String]
+    /// The title the agent gave the session. Describes what you were doing inside
+    /// the repository — useful as a subtitle, misleading as an identity.
+    public var sessionTitle: String?
+
     public init(
         repositoryPath: String,
         repositoryName: String,
@@ -34,7 +44,11 @@ public struct DetectionEvidence: Codable, Hashable, Sendable {
         agents: [AgentName],
         lastPrompt: String? = nil,
         lastSessionAt: Date? = nil,
-        scoredAt: Date = Date()
+        scoredAt: Date = Date(),
+        changedFiles: [String] = [],
+        lastCommitSubject: String? = nil,
+        promptArc: [String] = [],
+        sessionTitle: String? = nil
     ) {
         self.repositoryPath = repositoryPath
         self.repositoryName = repositoryName
@@ -47,6 +61,47 @@ public struct DetectionEvidence: Codable, Hashable, Sendable {
         self.lastPrompt = lastPrompt
         self.lastSessionAt = lastSessionAt
         self.scoredAt = scoredAt
+        self.changedFiles = changedFiles
+        self.lastCommitSubject = lastCommitSubject
+        self.promptArc = promptArc
+        self.sessionTitle = sessionTitle
+    }
+
+    /// Files that were generated rather than written. They show up in `git status`
+    /// constantly and tell you nothing about what you were building.
+    static func isGenerated(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent.lowercased()
+        let lowered = path.lowercased()
+
+        let generatedNames: Set<String> = [
+            "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
+            "cargo.lock", "poetry.lock", "gemfile.lock", "composer.lock",
+            "package.json", ".ds_store", "next-env.d.ts",
+        ]
+        if generatedNames.contains(name) { return true }
+
+        let generatedDirs = ["/dist/", "/build/", "/.next/", "/node_modules/",
+                             "/vendor/", "/target/", "/coverage/", "/.venv/"]
+        if generatedDirs.contains(where: { lowered.contains($0) }) { return true }
+
+        return name.hasSuffix(".min.js") || name.hasSuffix(".map") || name.hasSuffix(".d.ts")
+    }
+
+    /// A short, recognisable list of what you were touching.
+    ///
+    /// Source files first — those are the ones that make you say "oh, *that*".
+    /// Generated files are only mentioned if there is nothing else to show.
+    public var fileSummary: String? {
+        guard !changedFiles.isEmpty else { return nil }
+
+        let meaningful = changedFiles.filter { !Self.isGenerated($0) }
+        let pool = meaningful.isEmpty ? changedFiles : meaningful
+
+        let names = pool.prefix(4).map { ($0 as NSString).lastPathComponent }
+        let extra = changedFiles.count - names.count
+        let summary = names.joined(separator: ", ") + (extra > 0 ? " +\(extra) more" : "")
+
+        return meaningful.isEmpty ? summary + " (generated only)" : summary
     }
 
     /// Human-readable justification lines, one per observed signal. Rendered

@@ -74,6 +74,7 @@ public struct CodexAdapter: AgentAdapter {
         var firstPrompt: String?
         var lastPrompt: String?
         var lastSubstantivePrompt: String?
+        var arc: [String] = []
         var startedAt: Date?
         var lastActivityAt: Date?
         var messageCount = 0
@@ -103,7 +104,11 @@ public struct CodexAdapter: AgentAdapter {
                 messageCount += 1
                 if firstPrompt == nil { firstPrompt = text }
                 lastPrompt = text
-                if AgentSession.isSubstantive(text) { lastSubstantivePrompt = text }
+                if AgentSession.isSubstantive(text) {
+                    lastSubstantivePrompt = text
+                    arc.append(text)
+                    if arc.count > 6 { arc.removeFirst() }
+                }
             default:
                 break
             }
@@ -122,6 +127,7 @@ public struct CodexAdapter: AgentAdapter {
             firstPrompt: firstPrompt,
             lastPrompt: lastPrompt,
             lastSubstantivePrompt: lastSubstantivePrompt,
+            recentPrompts: arc,
             startedAt: startedAt,
             lastActivityAt: lastActivityAt ?? meta.modifiedAt,
             filePath: path,

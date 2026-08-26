@@ -1,0 +1,64 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:flowtrace}",
+            "name": "Debug FlowTraceApp",
+            "target": "FlowTraceApp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug FlowTraceApp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:flowtrace}",
+            "name": "Release FlowTraceApp",
+            "target": "FlowTraceApp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release FlowTraceApp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:flowtrace}",
+            "name": "Debug flowtrace",
+            "target": "flowtrace",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug flowtrace"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:flowtrace}",
+            "name": "Release flowtrace",
+            "target": "flowtrace",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release flowtrace"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:flowtrace}",
+            "name": "Debug flowtrace-tests",
+            "target": "flowtrace-tests",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug flowtrace-tests"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:flowtrace}",
+            "name": "Release flowtrace-tests",
+            "target": "flowtrace-tests",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release flowtrace-tests"
+        }
+    ]
+}

@@ -126,25 +126,56 @@ struct ProposalCard: View {
         Card {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(spacing: Theme.Space.s) {
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.purple)
-                    Text(isEditing ? "Review before adding" : proposal.suggestedTitle)
-                        .font(.system(size: 13, weight: .semibold))
+                    Text(isEditing ? "Review before adding" : evidence.repositoryName)
+                        .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)
+                    if !isEditing {
+                        Chip(text: evidence.branch, color: .blue)
+                    }
                     Spacer()
-                    Text(evidence.repositoryName)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text(evidence.branch)
+                    Text("you stopped \(evidence.daysSinceLastCommit)d ago")
                         .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.heatColor(days: evidence.daysSinceLastCommit))
                 }
 
-                // The evidence, verbatim. This is the part that earns trust.
-                HStack(spacing: Theme.Space.xs) {
-                    ForEach(evidence.reasons, id: \.self) { reason in
-                        Chip(text: reason, color: Theme.heatColor(days: evidence.daysSinceLastCommit))
+                // Everything below is what you were actually doing. Counts and
+                // staleness go last, because they never told you what a thing was.
+                if !isEditing {
+                    if let was = evidence.sessionTitle {
+                        detailRow("was", was, weight: .medium)
+                    }
+                    if let files = evidence.fileSummary {
+                        detailRow("editing", files, mono: true)
+                    }
+                    if let subject = evidence.lastCommitSubject {
+                        detailRow("last landed", subject)
+                    }
+
+                    if !evidence.promptArc.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(evidence.promptArc, id: \.self) { prompt in
+                                HStack(alignment: .top, spacing: 5) {
+                                    Text("·").foregroundStyle(.tertiary)
+                                    Text(prompt)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                        .padding(.top, 1)
+                    }
+
+                    HStack(spacing: Theme.Space.xs) {
+                        if evidence.dirtyFileCount > 0 {
+                            Chip(text: "\(evidence.dirtyFileCount) uncommitted", color: .orange)
+                        }
+                        if evidence.unpushedCommitCount > 0 {
+                            Chip(text: "\(evidence.unpushedCommitCount) unpushed", color: .orange)
+                        }
+                        ForEach(evidence.agents, id: \.self) { agent in
+                            Chip(text: agent.label, color: .purple)
+                        }
                     }
                 }
 
@@ -156,15 +187,6 @@ struct ProposalCard: View {
                     }
                     .padding(.top, Theme.Space.xs)
                 } else {
-                    if let prompt = evidence.lastPrompt, !prompt.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            FieldLabel(text: "Last thing you asked here")
-                            Text(prompt)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(3)
-                        }
-                    }
                     Text(evidence.repositoryPath.abbreviatingHome)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
@@ -201,6 +223,25 @@ struct ProposalCard: View {
                 .controlSize(.small)
                 .padding(.top, Theme.Space.xs)
             }
+        }
+    }
+
+
+    /// A labelled line of context: a quiet label, then the thing itself.
+    private func detailRow(
+        _ label: String, _ value: String,
+        mono: Bool = false, weight: Font.Weight = .regular
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .frame(width: 62, alignment: .trailing)
+            Text(value)
+                .font(.system(size: 12, weight: weight, design: mono ? .monospaced : .default))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
         }
     }
 
