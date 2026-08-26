@@ -138,7 +138,8 @@ struct MenuBarContent: View {
                     NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
                 }
                 Spacer()
-                Text("⌥Space").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(model.captureShortcut.displayString)
+                    .font(.system(size: 10)).foregroundStyle(.tertiary)
             }
             Button("Capture context…") {
                 activate()

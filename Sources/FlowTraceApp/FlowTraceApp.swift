@@ -96,6 +96,10 @@ struct RootView: View {
             model.refresh()
             model.startServerIfEnabled()
             registerHotKey()
+        }
+        .onChange(of: model.captureShortcut) { _, updated in
+            guard let controller = quickCapture else { return }
+            registerShortcut(updated, controller: controller)
             // Lets `flowtrace resume <thread> --open` land straight on a thread.
             if let requested = ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_THREAD"],
                model.thread(id: requested) != nil {
@@ -118,9 +122,7 @@ struct RootView: View {
         guard hotKey == nil else { return }
         let controller = QuickCaptureController(model: model)
         quickCapture = controller
-        hotKey = GlobalHotKey {
-            Task { @MainActor in controller.toggle() }
-        }
+        registerShortcut(model.captureShortcut, controller: controller)
 
         // Same panel, reachable from the menubar for anyone who hasn't learned
         // the shortcut yet.
@@ -129,6 +131,19 @@ struct RootView: View {
         ) { _ in
             Task { @MainActor in controller.toggle() }
         }
+    }
+
+    /// Claims a shortcut, replacing whatever was registered before, and reports
+    /// back whether the system accepted it.
+    private func registerShortcut(_ shortcut: HotKeyShortcut, controller: QuickCaptureController) {
+        // Releasing the old registration first — Carbon will not hand over a
+        // combination that is still claimed by this process.
+        hotKey = nil
+        let key = GlobalHotKey(shortcut: shortcut) {
+            Task { @MainActor in controller.toggle() }
+        }
+        hotKey = key
+        model.shortcutFailure = key.failure?.message
     }
 }
 

@@ -95,6 +95,13 @@ final class AppModel {
     var serverPort: UInt16?
     var serverError: String?
 
+    /// The shortcut that opens the quick-capture panel. Changing it re-registers
+    /// the global hotkey; `shortcutFailure` says so when the system refuses.
+    var captureShortcut = HotKeyShortcut.load() {
+        didSet { captureShortcut.save() }
+    }
+    var shortcutFailure: String?
+
     var localServerEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "flowtrace.localServer") }
         set {

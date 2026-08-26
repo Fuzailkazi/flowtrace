@@ -12,6 +12,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                shortcutSection
                 sources
                 extensionSection
                 storage
@@ -104,6 +105,43 @@ struct SettingsView: View {
             }
         }
         .opacity(adapter.isAvailable ? 1 : 0.55)
+    }
+
+    // MARK: - Shortcut
+
+    private var shortcutSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            SectionHeader(title: "Shortcut", subtitle: "works anywhere, no permission needed")
+            Card {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Why am I here?")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Opens a small panel over whatever you're doing, "
+                                 + "so you can note why you're there without leaving it.")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        ShortcutRecorder(shortcut: Binding(
+                            get: { model.captureShortcut },
+                            set: { model.captureShortcut = $0 }
+                        ))
+                    }
+
+                    if let failure = model.shortcutFailure {
+                        Label(failure, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("Spotlight, Raycast and Alfred commonly hold ⌥Space — "
+                             + "if nothing happens, pick another combination.")
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Browser extension
