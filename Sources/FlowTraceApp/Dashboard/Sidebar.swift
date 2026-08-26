@@ -133,6 +133,13 @@ struct MenuBarContent: View {
 
             Divider()
 
+            HStack {
+                Button("Why am I here?") {
+                    NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
+                }
+                Spacer()
+                Text("⌥Space").font(.system(size: 10)).foregroundStyle(.tertiary)
+            }
             Button("Capture context…") {
                 activate()
                 NotificationCenter.default.post(name: .flowtraceCapture, object: nil)

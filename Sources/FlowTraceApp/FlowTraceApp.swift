@@ -81,6 +81,7 @@ struct DatabaseUnavailableView: View {
 struct RootView: View {
     @Bindable var model: AppModel
     @State private var hotKey: GlobalHotKey?
+    @State private var quickCapture: QuickCaptureController?
 
     var body: some View {
         Group {
@@ -108,14 +109,25 @@ struct RootView: View {
         }
     }
 
-    /// ⌥Space from anywhere opens capture. Silently skipped if another app
-    /// already owns the combination.
+    /// ⌥Space opens a small panel over whatever you are doing.
+    ///
+    /// It deliberately does not bring FlowTrace to the front: being thrown into
+    /// another app is exactly the interruption that stops people capturing
+    /// anything. Silently skipped if another app already owns the combination.
     private func registerHotKey() {
         guard hotKey == nil else { return }
+        let controller = QuickCaptureController(model: model)
+        quickCapture = controller
         hotKey = GlobalHotKey {
-            NSApplication.shared.activate(ignoringOtherApps: true)
-            NSApplication.shared.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
-            NotificationCenter.default.post(name: .flowtraceCapture, object: nil)
+            Task { @MainActor in controller.toggle() }
+        }
+
+        // Same panel, reachable from the menubar for anyone who hasn't learned
+        // the shortcut yet.
+        NotificationCenter.default.addObserver(
+            forName: .flowtraceQuickCapture, object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in controller.toggle() }
         }
     }
 }
@@ -215,6 +227,7 @@ struct DetailPane: View {
 extension Notification.Name {
     static let flowtraceNewThread = Notification.Name("flowtrace.newThread")
     static let flowtraceCapture = Notification.Name("flowtrace.capture")
+    static let flowtraceQuickCapture = Notification.Name("flowtrace.quickCapture")
 }
 
 struct FlowTraceCommands: Commands {
@@ -228,6 +241,11 @@ struct FlowTraceCommands: Commands {
                 NotificationCenter.default.post(name: .flowtraceNewThread, object: nil)
             }
             .keyboardShortcut("n", modifiers: .command)
+
+            Button("Why Am I Here?…") {
+                NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
+            }
+            .keyboardShortcut("j", modifiers: [.command, .shift])
 
             Button("Capture Context…") {
                 NotificationCenter.default.post(name: .flowtraceCapture, object: nil)

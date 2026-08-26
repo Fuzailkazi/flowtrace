@@ -110,7 +110,7 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
     }
 
     /// Collapse a prompt to one short line suitable for a title.
-    static func condense(_ text: String, limit: Int = 72) -> String {
+    public static func condense(_ text: String, limit: Int = 72) -> String {
         let flat = text
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
