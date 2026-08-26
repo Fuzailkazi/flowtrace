@@ -96,6 +96,7 @@ struct RootView: View {
         .task {
             model.refresh()
             model.startServerIfEnabled()
+            model.startRecordingIfEnabled()
             registerHotKey()
             // Lets `flowtrace resume <thread> --open` land straight on a thread.
             if let requested = ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_THREAD"],
@@ -187,31 +188,18 @@ struct MainWindow: View {
     @State private var showingNewThread = false
 
     var body: some View {
-        NavigationSplitView {
-            Sidebar(model: model)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 224, max: 280)
-        } detail: {
-            DetailPane(model: model)
-        }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search threads, tabs, repositories")
-        .onChange(of: model.searchText) { _, _ in model.runSearch() }
-        .toolbar {
-            ToolbarItemGroup {
-                Button {
-                    showingNewThread = true
-                } label: {
-                    Label("New Thread", systemImage: "plus")
-                }
-                .help("New work thread (⌘N)")
-
-                Button {
-                    showingCapture = true
-                } label: {
-                    Label("Capture", systemImage: "square.and.arrow.down")
-                }
-                .help("Capture browser tabs or a repository (⌘⇧C)")
+        Group {
+            // One screen. The sidebar that used to live here — All / Active /
+            // Paused / Completed — was the grammar of a task manager, and it told
+            // everyone the wrong thing about what this is.
+            if model.route == .timeline {
+                TimelineView(model: model)
+            } else {
+                DetailPane(model: model)
+                    .background(Journal.paper)
             }
         }
+        .toolbar { chrome }
         .sheet(isPresented: $showingCapture) { CaptureSheet(model: model) }
         .sheet(isPresented: $showingNewThread) { NewThreadSheet(model: model) }
         .overlay(alignment: .bottom) {
@@ -226,12 +214,45 @@ struct MainWindow: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: model.toast)
-        .background(Theme.pageBackground)
+        .background(Journal.paper)
         .onReceive(NotificationCenter.default.publisher(for: .flowtraceNewThread)) { _ in
             showingNewThread = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .flowtraceCapture)) { _ in
             showingCapture = true
+        }
+    }
+
+    /// Everything that isn't the day itself lives in one menu, so the window has
+    /// a single subject.
+    @ToolbarContentBuilder
+    private var chrome: some ToolbarContent {
+        ToolbarItemGroup {
+            if model.route != .timeline {
+                Button {
+                    model.route = .timeline
+                } label: {
+                    Label("Today", systemImage: "chevron.left")
+                }
+                .help("Back to today")
+            }
+
+            Spacer()
+
+            Menu {
+                Button("Today") { model.route = .timeline }
+                Divider()
+                Button("Unfinished work") { model.route = .dashboard }
+                Button("All threads") { model.route = .status(.active) }
+                Button("Recent captures") { model.route = .recentCaptures }
+                Divider()
+                Button("Capture context…") { showingCapture = true }
+                Button("New thread…") { showingNewThread = true }
+                Divider()
+                Button("Settings") { model.route = .settings }
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
+            }
         }
     }
 }
@@ -246,6 +267,8 @@ struct DetailPane: View {
             SearchResultsView(model: model)
         } else {
             switch model.route {
+            case .timeline:
+                TimelineView(model: model)
             case .dashboard:
                 DashboardView(model: model)
             case .status(let status):

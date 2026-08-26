@@ -4,6 +4,8 @@ import FlowTraceCore
 
 /// What the main content area is showing.
 enum Route: Hashable {
+    /// The day you can read — the app's main screen.
+    case timeline
     case dashboard
     case status(ThreadStatus)
     case thread(String)
@@ -76,7 +78,7 @@ final class AppModel {
     var recentTabs: [BrowserContext] = []
     var recentCode: [CodeContext] = []
 
-    var route: Route = .dashboard
+    var route: Route = .timeline
     var searchText = ""
     var searchResults: [SearchHit] = []
 
@@ -101,6 +103,33 @@ final class AppModel {
         didSet { captureTrigger.save() }
     }
     var shortcutFailure: String?
+
+    // MARK: - Recording
+
+    /// Whether FlowTrace is watching what you do. Off until switched on — the
+    /// timeline is empty and says so rather than capturing first and asking later.
+    var isRecording: Bool {
+        get { UserDefaults.standard.bool(forKey: "flowtrace.recording") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "flowtrace.recording")
+            newValue ? recorder.start() : recorder.stop()
+        }
+    }
+
+    /// Not observed: the recorder is machinery, and its identity never changes,
+    /// so it must not participate in view invalidation.
+    @ObservationIgnored private var _recorder: ActivityRecorder?
+
+    var recorder: ActivityRecorder {
+        if let _recorder { return _recorder }
+        let made = ActivityRecorder(store: store)
+        _recorder = made
+        return made
+    }
+
+    func startRecordingIfEnabled() {
+        if isRecording { recorder.start() }
+    }
 
     /// Bumped to force the trigger to re-register when nothing about it changed
     /// but the world did — notably when Accessibility is granted while the app

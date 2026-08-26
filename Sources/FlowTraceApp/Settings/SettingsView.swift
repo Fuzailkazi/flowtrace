@@ -16,6 +16,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                recordingSection
                 shortcutSection
                 sources
                 extensionSection
@@ -116,6 +117,74 @@ struct SettingsView: View {
             }
         }
         .opacity(adapter.isAvailable ? 1 : 0.55)
+    }
+
+    // MARK: - Recording
+
+    private var recordingSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            SectionHeader(title: "Your day", subtitle: "off until you turn it on")
+            Card {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Toggle(isOn: Binding(
+                        get: { model.isRecording },
+                        set: { model.isRecording = $0 }
+                    )) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Write down what I'm doing")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Which app is in front, and what it's showing. "
+                                 + "Nothing is recorded while the screen is locked "
+                                 + "or you've stepped away, and FlowTrace never "
+                                 + "records itself.")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if model.isRecording {
+                        Divider()
+                        HStack(spacing: Theme.Space.s) {
+                            Image(systemName: accessibilityGranted
+                                  ? "checkmark.circle.fill" : "lock.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(accessibilityGranted ? .green : .orange)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(accessibilityGranted
+                                     ? "Window titles are being read"
+                                     : "Without Accessibility, entries show the app only")
+                                    .font(.system(size: 12, weight: .medium))
+                                Text(accessibilityGranted
+                                     ? "Read once when you switch apps — never watched continuously."
+                                     : "\"Chrome\" tells you little; \"Chrome — pencil.com\" tells you what you were doing.")
+                                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            if !accessibilityGranted {
+                                Button("Grant…") {
+                                    AccessibilityPermission.request()
+                                    AccessibilityPermission.openSettings()
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+
+                        HStack {
+                            Text("Delete everything recorded today")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Forget today", role: .destructive) {
+                                try? model.store.deleteActivity(on: Date())
+                                model.toast = Toast(message: "Today's record deleted")
+                            }
+                            .controlSize(.small)
+                        }
+                        .padding(.top, Theme.Space.xs)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Shortcut

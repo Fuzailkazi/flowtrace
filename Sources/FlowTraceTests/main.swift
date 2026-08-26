@@ -14,6 +14,7 @@ runBrowserTests()
 runServerTests()
 runCORSTests()
 runBriefTests()
+runActivityTests()
 
 
 TestKit.summarize()

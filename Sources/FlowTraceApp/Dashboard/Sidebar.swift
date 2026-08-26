@@ -7,6 +7,8 @@ struct Sidebar: View {
     var body: some View {
         List(selection: selectionBinding) {
             Section {
+                row(.timeline, "Today", "text.line.first.and.arrowtriangle.forward",
+                    badge: nil)
                 row(.dashboard, "Resume", "arrow.uturn.backward.circle",
                     badge: model.proposals.isEmpty ? nil : model.proposals.count,
                     badgeIsAttention: true)

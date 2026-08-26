@@ -151,6 +151,28 @@ enum Migrations {
             try db.create(index: "idx_brieflog_shown", on: "briefLog", columns: ["shownAt"])
         }
 
+        // The day timeline. Spans rather than points, so the UI can say
+        // "1h 04m" instead of listing the same app forty times.
+        migrator.registerMigration("v3.activity") { db in
+            try db.create(table: "activityEvent") { t in
+                t.primaryKey("id", .text)
+                t.column("kind", .text).notNull()
+                t.column("startedAt", .datetime).notNull()
+                t.column("endedAt", .datetime)
+                t.column("appName", .text).notNull()
+                t.column("bundleIdentifier", .text)
+                t.column("target", .text)
+                t.column("url", .text)
+                t.column("note", .text)
+                t.column("noteAt", .datetime)
+                t.column("metadata", .text).notNull().defaults(to: "{}")
+            }
+            // The timeline always asks for one day in order; this is the only
+            // query shape that matters.
+            try db.create(index: "idx_activity_started", on: "activityEvent",
+                          columns: ["startedAt"])
+        }
+
         return migrator
     }
 }
