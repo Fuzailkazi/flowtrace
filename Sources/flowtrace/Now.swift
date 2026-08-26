@@ -10,34 +10,36 @@ struct Now: ParsableCommand {
 
     func run() throws {
         let state = LiveStateReader().read()
+        let notes = (try? openStore().allProjectNotes()) ?? []
+        let byPath = Dictionary(uniqueKeysWithValues: notes.map { ($0.repositoryPath, $0) })
+        let projects = state.projects(notes: byPath)
 
         print("")
-        if let headline = state.headline {
-            print("  \(Term.bold(headline))")
-            print("")
-        }
+        let live = projects.filter { $0.agents.contains { $0.state != .idle } }.count
+        print("  \(Term.bold("\(projects.count) place\(projects.count == 1 ? "" : "s")"))"
+              + Term.dim("  \(state.agents.count) agents · \(state.servers.count) servers"
+                         + (live > 0 ? " · \(live) active" : "")))
+        print("")
 
-        for agent in state.agents {
-            let mark = switch agent.state {
-            case .working: Term.green("●")
-            case .waiting: Term.yellow("●")
-            case .idle:    Term.dim("○")
+        for project in projects {
+            let mark = project.agents.contains { $0.state == .working } ? Term.green("●")
+                     : project.agents.contains { $0.state == .waiting } ? Term.cyan("●")
+                     : Term.dim("○")
+
+            print("  \(mark) \(Term.bold(project.name))"
+                  + Term.dim("   \(project.statusLabel)"))
+
+            if let note = project.note, !note.building.isEmpty {
+                print("    \(Term.cyan(note.building))")
             }
-            print("  \(mark) \(Term.bold(agent.repositoryName))"
-                  + Term.dim("  \(agent.agent.label) · \(agent.lastActivityLabel)"))
-            if let prompt = agent.lastPrompt {
+            if let prompt = project.lastPrompt {
                 print("    \(Term.dim(prompt))")
             }
-        }
-
-        if !state.servers.isEmpty {
-            print("")
-            print("  \(Term.bold("\(state.servers.count) server\(state.servers.count == 1 ? "" : "s") listening"))")
-            for server in state.servers {
-                print("  \(Term.cyan(":\(server.port)"))"
-                      + Term.dim("  \(server.processName) · \(server.projectName ?? "")"))
+            if !project.servers.isEmpty {
+                let ports = project.servers.map { ":\($0.port)" }.joined(separator: " ")
+                print("    \(Term.dim("listening"))  \(Term.cyan(ports))")
             }
+            print("")
         }
-        print("")
     }
 }

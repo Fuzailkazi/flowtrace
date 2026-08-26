@@ -49,6 +49,7 @@ public struct LiveStateReader: Sendable {
                 pid: process.pid,
                 agent: agent,
                 workingDirectory: process.workingDirectory,
+                projectRoot: FilePathCanon.canonical(root),
                 repositoryName: SessionImporter.folderLabel(for: root),
                 state: .idle
             )
@@ -124,13 +125,14 @@ public struct LiveStateReader: Sendable {
             var server = server
             server.workingDirectory = cwd
             let root = git.topLevel(of: cwd) ?? cwd
+            server.projectRoot = FilePathCanon.canonical(root)
             server.projectName = SessionImporter.folderLabel(for: root)
             return server
         }
         .sorted { $0.port < $1.port }
     }
 
-    static func port(from address: String) -> UInt16? {
+    public static func port(from address: String) -> UInt16? {
         guard let colon = address.lastIndex(of: ":") else { return nil }
         return UInt16(address[address.index(after: colon)...])
     }

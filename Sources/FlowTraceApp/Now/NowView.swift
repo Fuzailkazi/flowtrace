@@ -10,6 +10,7 @@ struct NowView: View {
     @Bindable var model: AppModel
 
     @State private var state = LiveState()
+    @State private var projects: [LiveProject] = []
     @State private var notes: [String: ProjectNote] = [:]
     @State private var editing: String?
     @State private var draft = ""
@@ -18,6 +19,8 @@ struct NowView: View {
 
     private let tick = Timer.publish(every: 8, on: .main, in: .common).autoconnect()
 
+    private var forgotten: Int { projects.filter(\.isForgotten).count }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -25,10 +28,12 @@ struct NowView: View {
                 if loading && state.agents.isEmpty {
                     ProgressView().controlSize(.small)
                         .frame(maxWidth: .infinity).padding(.vertical, Journal.Space.xl)
+                } else if projects.isEmpty {
+                    empty
                 } else {
-                    agents
-                    servers
-                    if state.agents.isEmpty && state.servers.isEmpty { empty }
+                    ForEach(projects) { project in
+                        projectBlock(project)
+                    }
                 }
             }
             .padding(.horizontal, Journal.Space.xl)
@@ -53,77 +58,111 @@ struct NowView: View {
                     .foregroundStyle(Journal.inkSoft)
             }
 
-            if let headline = state.headline {
-                // The idle count is the surprising half, so it gets the colour.
-                HStack(spacing: 5) {
-                    Text(headline)
-                        .font(.observed(12))
-                        .foregroundStyle(state.idleAgents.isEmpty ? Journal.inkSoft : Journal.amber)
+            // The forgotten count is the surprising half, so it gets the colour.
+            HStack(spacing: 4) {
+                Text("\(projects.count) place\(projects.count == 1 ? "" : "s")")
+                    .foregroundStyle(Journal.inkSoft)
+                if forgotten > 0 {
+                    Text("·").foregroundStyle(Journal.ruleFirm)
+                    Text("\(forgotten) left running and forgotten")
+                        .foregroundStyle(Journal.amber)
                 }
             }
+            .font(.observed(12))
         }
         .padding(.top, Journal.Space.l)
         .padding(.bottom, Journal.Space.m)
         .overlay(alignment: .bottom) { Divider().overlay(Journal.ruleFirm) }
     }
 
-    // MARK: - Agents
+    // MARK: - One place
 
-    @ViewBuilder
-    private var agents: some View {
-        ForEach(state.agents) { agent in
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: Journal.Space.s) {
-                    Circle()
-                        .fill(colour(for: agent.state))
-                        .frame(width: 7, height: 7)
+    /// Everything happening in one project: its agents, its servers, and what
+    /// you said you were building. Grouped because work happens in places — the
+    /// previous split across two lists hid that a project could have an agent
+    /// idle for days *and* a server still holding a port.
+    private func projectBlock(_ project: LiveProject) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: Journal.Space.s) {
+                Circle()
+                    .fill(colour(for: project))
+                    .frame(width: 7, height: 7)
 
-                    Text(agent.repositoryName)
-                        .font(.observed(14, weight: .semibold))
-                        .foregroundStyle(Journal.ink)
+                Text(project.name)
+                    .font(.observed(14.5, weight: .semibold))
+                    .foregroundStyle(Journal.ink)
 
-                    Text(agent.agent.label)
+                ForEach(Array(Set(project.agents.map(\.agent))), id: \.self) { agent in
+                    Text(agent.label)
                         .font(.observed(10.5, weight: .medium))
                         .foregroundStyle(Journal.pen)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
-
-                    Spacer(minLength: Journal.Space.s)
-
-                    Text(agent.lastActivityLabel)
-                        .font(.observed(11))
-                        .foregroundStyle(agent.state == .idle ? Journal.amber : Journal.inkSoft)
                 }
 
-                if let prompt = agent.lastPrompt {
-                    Text(prompt)
-                        .font(.observed(12.5))
-                        .foregroundStyle(Journal.inkMid)
-                        .lineLimit(2)
-                }
+                Spacer(minLength: Journal.Space.s)
 
-                projectNote(for: agent.workingDirectory, name: agent.repositoryName)
+                Text(project.statusLabel)
+                    .font(.observed(11))
+                    .foregroundStyle(project.isForgotten ? Journal.amber : Journal.inkSoft)
             }
-            .padding(.vertical, Journal.Space.m)
-            .overlay(alignment: .bottom) { Divider().overlay(Journal.rule) }
-            .contextMenu {
-                Button("Open in Finder") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: agent.workingDirectory))
+
+            if let prompt = project.lastPrompt {
+                Text(prompt)
+                    .font(.observed(12.5))
+                    .foregroundStyle(Journal.inkMid)
+                    .lineLimit(2)
+            }
+
+            if !project.servers.isEmpty {
+                HStack(spacing: Journal.Space.s) {
+                    Text("listening")
+                        .font(.observed(10.5))
+                        .foregroundStyle(Journal.inkSoft)
+                    ForEach(project.servers) { server in
+                        Button {
+                            if let url = URL(string: server.address) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            Text(":\(String(server.port))")
+                                .font(.observed(11, weight: .medium)).monospacedDigit()
+                                .foregroundStyle(Journal.pen)
+                                .padding(.horizontal, 6).padding(.vertical, 1.5)
+                                .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(server.address)")
+                    }
+                    Spacer()
                 }
-                Button("Copy path") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(agent.workingDirectory, forType: .string)
-                }
+            }
+
+            projectNote(for: project.path, name: project.name)
+        }
+        .padding(.vertical, Journal.Space.m)
+        .overlay(alignment: .bottom) { Divider().overlay(Journal.rule) }
+        .contextMenu {
+            Button("Open in Finder") {
+                NSWorkspace.shared.open(URL(fileURLWithPath: project.path))
+            }
+            Button("Copy path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(project.path, forType: .string)
             }
         }
     }
 
     /// What you're building here — written once, kept forever, shown every time.
+    ///
+    /// Keyed on the repository rather than the session or the process, so it
+    /// outlives the thing it describes.
     @ViewBuilder
     private func projectNote(for path: String, name: String) -> some View {
-        let note = notes[FilePathCanon.canonical(path)]
+        let canonical = FilePathCanon.canonical(path)
+        let note = notes[canonical]
 
-        if editing == FilePathCanon.canonical(path) {
+        if editing == canonical {
             HStack(spacing: Journal.Space.s) {
                 TextField("what are you building here?", text: $draft)
                     .textFieldStyle(.plain)
@@ -165,48 +204,6 @@ struct NowView: View {
         }
     }
 
-    // MARK: - Servers
-
-    @ViewBuilder
-    private var servers: some View {
-        if !state.servers.isEmpty {
-            Text("Listening")
-                .font(.observed(10.5, weight: .semibold))
-                .tracking(1.2)
-                .foregroundStyle(Journal.inkSoft)
-                .padding(.top, Journal.Space.l)
-                .padding(.bottom, Journal.Space.s)
-
-            ForEach(state.servers) { server in
-                HStack(spacing: Journal.Space.m) {
-                    Text(":\(String(server.port))")
-                        .font(.observed(13, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(Journal.pen)
-                        .frame(width: 58, alignment: .leading)
-
-                    Text(server.projectName ?? server.processName)
-                        .font(.observed(13))
-                        .foregroundStyle(Journal.ink)
-
-                    Text(server.processName)
-                        .font(.observed(11))
-                        .foregroundStyle(Journal.inkSoft)
-
-                    Spacer()
-
-                    Button("Open") {
-                        if let url = URL(string: server.address) { NSWorkspace.shared.open(url) }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.observed(11, weight: .medium))
-                    .foregroundStyle(Journal.pen)
-                }
-                .padding(.vertical, Journal.Space.s)
-                .overlay(alignment: .bottom) { Divider().overlay(Journal.rule) }
-            }
-        }
-    }
-
     private var empty: some View {
         VStack(alignment: .leading, spacing: Journal.Space.s) {
             Text("Nothing running.")
@@ -221,12 +218,10 @@ struct NowView: View {
 
     // MARK: - Data
 
-    private func colour(for agentState: LiveAgent.State) -> Color {
-        switch agentState {
-        case .working: .green
-        case .waiting: Journal.pen
-        case .idle: Journal.ruleFirm
-        }
+    private func colour(for project: LiveProject) -> Color {
+        if project.agents.contains(where: { $0.state == .working }) { return .green }
+        if project.agents.contains(where: { $0.state == .waiting }) { return Journal.pen }
+        return Journal.ruleFirm
     }
 
     private func begin(path: String, existing: String) {
@@ -241,6 +236,7 @@ struct NowView: View {
         note.building = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if let saved = try? model.store.saveProjectNote(note) {
             notes[canonical] = saved
+            projects = state.projects(notes: notes)
         }
         editing = nil
     }
@@ -254,6 +250,7 @@ struct NowView: View {
 
         state = read.0
         notes = Dictionary(uniqueKeysWithValues: read.1.map { ($0.repositoryPath, $0) })
+        projects = read.0.projects(notes: notes)
         loading = false
     }
 }

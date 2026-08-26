@@ -16,6 +16,7 @@ runCORSTests()
 runBriefTests()
 runActivityTests()
 runSessionImportTests()
+runLiveProjectTests()
 
 
 TestKit.summarize()

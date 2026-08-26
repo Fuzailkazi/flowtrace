@@ -16,6 +16,9 @@ public struct LiveAgent: Identifiable, Hashable, Sendable {
     public var pid: Int32
     public var agent: AgentName
     public var workingDirectory: String
+    /// The repository root, so a server started in `tulu/frontend` and an agent
+    /// running in `tulu` are recognised as the same project.
+    public var projectRoot: String
     public var repositoryName: String
     public var branch: String?
 
@@ -25,6 +28,25 @@ public struct LiveAgent: Identifiable, Hashable, Sendable {
     public var sessionId: String?
     /// Your own note about this piece of work, if you've written one.
     public var note: String?
+
+    public init(
+        pid: Int32, agent: AgentName, workingDirectory: String, projectRoot: String,
+        repositoryName: String, branch: String? = nil, lastPrompt: String? = nil,
+        lastActivityAt: Date? = nil, state: State, sessionId: String? = nil,
+        note: String? = nil
+    ) {
+        self.pid = pid
+        self.agent = agent
+        self.workingDirectory = workingDirectory
+        self.projectRoot = projectRoot
+        self.repositoryName = repositoryName
+        self.branch = branch
+        self.lastPrompt = lastPrompt
+        self.lastActivityAt = lastActivityAt
+        self.state = state
+        self.sessionId = sessionId
+        self.note = note
+    }
 
     public var idleFor: TimeInterval {
         guard let lastActivityAt else { return .greatestFiniteMagnitude }
@@ -50,7 +72,22 @@ public struct LiveServer: Identifiable, Hashable, Sendable {
     public var port: UInt16
     public var processName: String
     public var workingDirectory: String?
+    /// The repository root — see `LiveAgent.projectRoot`.
+    public var projectRoot: String?
     public var projectName: String?
+
+    public init(
+        pid: Int32, port: UInt16, processName: String,
+        workingDirectory: String? = nil, projectRoot: String? = nil,
+        projectName: String? = nil
+    ) {
+        self.pid = pid
+        self.port = port
+        self.processName = processName
+        self.workingDirectory = workingDirectory
+        self.projectRoot = projectRoot
+        self.projectName = projectName
+    }
 
     public var address: String { "http://localhost:\(port)" }
 }

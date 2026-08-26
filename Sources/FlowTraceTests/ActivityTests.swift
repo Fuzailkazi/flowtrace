@@ -209,3 +209,82 @@ func runSessionImportTests() {
         expectEqual(day.first?.note, "figuring out the redesign", "the note survives")
     }
 }
+
+func runLiveProjectTests() {
+    TestKit.suite("Now — grouped by place")
+
+    func agent(
+        _ name: String, root: String, state: LiveAgent.State = .idle, minutesAgo: Double = 60
+    ) -> LiveAgent {
+        LiveAgent(
+            pid: Int32.random(in: 1000...9999),
+            agent: .claudeCode,
+            workingDirectory: root,
+            projectRoot: root,
+            repositoryName: name,
+            lastActivityAt: Date().addingTimeInterval(-minutesAgo * 60),
+            state: state
+        )
+    }
+
+    func server(_ port: UInt16, root: String, name: String) -> LiveServer {
+        LiveServer(
+            pid: Int32.random(in: 1000...9999), port: port, processName: "node",
+            workingDirectory: root, projectRoot: root, projectName: name
+        )
+    }
+
+    // The first version listed agents and servers separately, which hid that one
+    // project could have an abandoned agent *and* a server still holding a port.
+    TestKit.test("an agent and a server in one place become one entry") {
+        let state = LiveState(
+            agents: [agent("tulu", root: "/p/tulu")],
+            servers: [server(3000, root: "/p/tulu", name: "tulu")]
+        )
+        let projects = state.projects()
+        expectEqual(projects.count, 1, "one place")
+        expectEqual(projects.first?.agents.count, 1)
+        expectEqual(projects.first?.servers.count, 1)
+    }
+
+    // A server started in tulu/frontend belongs to tulu.
+    TestKit.test("subdirectories fold into the repository root") {
+        var sub = server(5173, root: "/p/tulu/frontend", name: "tulu")
+        sub.projectRoot = "/p/tulu"
+        let state = LiveState(agents: [agent("tulu", root: "/p/tulu")], servers: [sub])
+        expectEqual(state.projects().count, 1, "still one place")
+    }
+
+    TestKit.test("what is moving sorts above what is forgotten") {
+        let state = LiveState(agents: [
+            agent("stale", root: "/p/stale", state: .idle, minutesAgo: 5760),
+            agent("live", root: "/p/live", state: .working, minutesAgo: 1),
+        ])
+        expectEqual(state.projects().first?.name, "live", "active first")
+    }
+
+    // The case worth surfacing: quiet, but still running and still costing you.
+    TestKit.test("a place whose agents have all gone quiet is forgotten") {
+        let forgotten = LiveState(agents: [agent("old", root: "/p/old", state: .idle)])
+        expect(try unwrap(forgotten.projects().first).isForgotten)
+
+        let busy = LiveState(agents: [agent("new", root: "/p/new", state: .working)])
+        expect(!(try unwrap(busy.projects().first).isForgotten))
+    }
+
+    TestKit.test("a project carries the note you wrote for it") {
+        let note = ProjectNote(
+            repositoryPath: "/p/tulu", repositoryName: "tulu",
+            building: "genz landing page for the loom video"
+        )
+        let state = LiveState(agents: [agent("tulu", root: "/p/tulu")])
+        let projects = state.projects(notes: [note.repositoryPath: note])
+        expectEqual(projects.first?.note?.building, "genz landing page for the loom video")
+    }
+
+    TestKit.test("a port is read off an lsof address, IPv6 included") {
+        expectEqual(LiveStateReader.port(from: "127.0.0.1:3000"), 3000)
+        expectEqual(LiveStateReader.port(from: "*:8080"), 8080)
+        expectEqual(LiveStateReader.port(from: "[::1]:5432"), 5432)
+    }
+}
