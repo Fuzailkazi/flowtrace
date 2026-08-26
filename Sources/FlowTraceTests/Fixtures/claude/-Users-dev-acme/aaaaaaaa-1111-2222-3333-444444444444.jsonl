@@ -1,0 +1,9 @@
+{"type":"last-prompt","leafUuid":"x1","sessionId":"aaaaaaaa-1111-2222-3333-444444444444"}
+{"parentUuid":null,"isSidechain":false,"type":"user","uuid":"u1","timestamp":"2026-07-14T09:00:00.000Z","cwd":"/Users/dev/acme","sessionId":"aaaaaaaa-1111-2222-3333-444444444444","version":"2.1.216","gitBranch":"feat/oauth","message":{"role":"user","content":"add google oauth to the login page"}}
+{"isSidechain":false,"type":"assistant","uuid":"a1","timestamp":"2026-07-14T09:00:05.000Z","cwd":"/Users/dev/acme","gitBranch":"feat/oauth","message":{"role":"assistant","content":[{"type":"text","text":"I'll start by reading the auth module."}]}}
+{"isSidechain":false,"isMeta":true,"type":"user","uuid":"u2","timestamp":"2026-07-14T09:01:00.000Z","cwd":"/Users/dev/acme","gitBranch":"feat/oauth","message":{"role":"user","content":"Base directory for this skill: /Users/dev/.claude/skills/oauth-helper\n\n# OAuth Helper\n\nThis skill explains OAuth flows."}}
+{"isSidechain":false,"type":"user","uuid":"u3","timestamp":"2026-07-14T09:02:00.000Z","cwd":"/Users/dev/acme","gitBranch":"feat/oauth","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+{"type":"ai-title","aiTitle":"Add Google OAuth","sessionId":"aaaaaaaa-1111-2222-3333-444444444444"}
+{"isSidechain":true,"type":"user","uuid":"u4","timestamp":"2026-07-14T09:03:00.000Z","cwd":"/Users/dev/acme","message":{"role":"user","content":"sidechain probe that must be ignored"}}
+{"isSidechain":false,"type":"user","uuid":"u5","timestamp":"2026-07-14T09:04:00.000Z","cwd":"/Users/dev/acme","gitBranch":"feat/oauth","message":{"role":"user","content":"now add refresh token rotation before we ship"}}
+{"isSidechain":false,"type":"user","uuid":"u6","timestamp":"2026-07-14T09:05:00.000Z","cwd":"/Users/dev/acme","gitBranch":"feat/oauth","message":{"role":"user","content":"do it"}}

@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FlowTrace settings</title>
+<link rel="stylesheet" href="styles.css">
+<body style="width: 420px">
+  <h2 style="margin:0 0 4px;font-size:15px">Pair with FlowTrace</h2>
+  <p style="margin:0 0 14px;font-size:12px;color:var(--muted)">
+    Open FlowTrace → Settings → Browser extension, switch the endpoint on, and copy the token.
+  </p>
+
+  <label class="field">
+    <span>Port</span>
+    <input id="port" type="text" inputmode="numeric" placeholder="8787">
+  </label>
+
+  <label class="field">
+    <span>Token</span>
+    <input id="token" type="text" placeholder="Paste from FlowTrace → Settings">
+  </label>
+
+  <button id="save" class="primary">Save and test</button>
+  <div id="status" class="status" hidden></div>
+
+  <script type="module" src="options.js"></script>
+</body>

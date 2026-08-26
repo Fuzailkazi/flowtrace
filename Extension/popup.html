@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FlowTrace</title>
+<link rel="stylesheet" href="styles.css">
+<body>
+  <div id="status" class="status" hidden></div>
+
+  <div id="filed" class="filed" hidden></div>
+
+  <label class="field">
+    <span>Attach to</span>
+    <select id="thread"></select>
+  </label>
+
+  <label class="field" id="newTitleField" hidden>
+    <span>New thread title</span>
+    <input id="newTitle" type="text" placeholder="What is this for?">
+  </label>
+
+  <label class="field">
+    <span>Why did you open this?</span>
+    <textarea id="note" rows="2" placeholder="The reason you'll have forgotten by Thursday"></textarea>
+  </label>
+
+  <div class="scope">
+    <label><input type="radio" name="scope" value="current" checked> This tab</label>
+    <label><input type="radio" name="scope" value="window"> All tabs in this window</label>
+  </div>
+
+  <div class="tabinfo" id="tabinfo"></div>
+
+  <button id="capture" class="primary">Capture</button>
+  <a href="#" id="openOptions" class="link">Settings</a>
+
+  <script type="module" src="popup.js"></script>
+</body>

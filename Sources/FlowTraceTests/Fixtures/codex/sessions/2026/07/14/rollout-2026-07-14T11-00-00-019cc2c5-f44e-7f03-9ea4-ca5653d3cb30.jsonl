@@ -1,0 +1,4 @@
+{"timestamp":"2026-07-14T11:00:00.000Z","type":"session_meta","payload":{"id":"019cc2c5-f44e-7f03-9ea4-ca5653d3cb30","timestamp":"2026-07-14T11:00:00.000Z","cwd":"/Users/dev/acme/packages/api","originator":"codex-tui","cli_version":"0.124.0"}}
+{"timestamp":"2026-07-14T11:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/Users/dev/acme/packages/api</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-07-14T11:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"wire the api routes to the new oauth service","images":null}}
+{"timestamp":"2026-07-14T11:05:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"yes"}}
