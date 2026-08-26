@@ -144,10 +144,9 @@ struct TimelineRow: View {
     private var machineSummary: String? {
         switch event.kind {
         case .agentSession:
-            let messages = event.metadata["messages"].map { " · \($0) messages" } ?? ""
-            return (event.metadata["about"] ?? "").isEmpty
-                ? nil
-                : (event.metadata["about"] ?? "") + messages
+            // The duration column already carries the message count.
+            let about = event.metadata["about"] ?? ""
+            return about.isEmpty ? event.metadata["asked"]?.split(separator: "\n").last.map(String.init) : about
         case .git:
             return event.metadata["summary"]
         default:

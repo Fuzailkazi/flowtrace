@@ -11,11 +11,25 @@ struct TimelineView: View {
     @State private var day = Calendar.current.startOfDay(for: Date())
     @State private var events: [ActivityEvent] = []
     @State private var refreshTick = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
+    /// Highlighted after being picked in the rail.
+    @State private var selected: String?
 
     private var unexplained: Int { events.filter(\.isUnexplained).count }
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
     var body: some View {
+        NavigationSplitView {
+            SessionsRail(model: model, day: day) { session in
+                selected = session.id
+            }
+            .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
+        } detail: {
+            day_
+        }
+    }
+
+    private var day_: some View {
+        ScrollViewReader { scroller in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 dayHeader
@@ -35,6 +49,11 @@ struct TimelineView: View {
                                 load()
                             }
                         )
+                        .id(event.id)
+                        .background(
+                            selected == event.id
+                                ? Journal.penSoft : Color.clear
+                        )
                         Divider().overlay(Journal.rule)
                     }
                 }
@@ -43,9 +62,24 @@ struct TimelineView: View {
             .padding(.bottom, Journal.Space.xl)
         }
         .background(Journal.paper)
-        .task(id: day) { load() }
-        .onReceive(refreshTick) { _ in if isToday { load() } }
+        .task(id: day) { load(); model.importSessions(on: day) }
+        .onReceive(refreshTick) { _ in
+            guard isToday else { return }
+            load()
+            model.importSessions(on: day)
+        }
+        .onChange(of: model.activityRevision) { _, _ in load() }
+        .onChange(of: selected) { _, id in
+            guard let id else { return }
+            withAnimation(.snappy(duration: 0.3)) { scroller.scrollTo(id, anchor: .center) }
+            // The highlight is a pointer, not a selection — it fades on its own.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.6))
+                withAnimation(.easeOut(duration: 0.5)) { selected = nil }
+            }
+        }
         .toolbar { toolbar }
+        }
     }
 
     // MARK: - Header

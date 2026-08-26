@@ -173,6 +173,31 @@ enum Migrations {
                           columns: ["startedAt"])
         }
 
+        // Lets a session or commit be imported repeatedly without duplicating —
+        // the day is rebuilt from transcripts every few minutes.
+        migrator.registerMigration("v4.activityExternalId") { db in
+            try db.alter(table: "activityEvent") { t in
+                t.add(column: "externalId", .text)
+            }
+            try db.create(
+                index: "idx_activity_external", on: "activityEvent",
+                columns: ["externalId"], unique: true,
+                ifNotExists: true
+            )
+        }
+
+        // Keyed on the repository, so it outlives the session and the process.
+        migrator.registerMigration("v5.projectNote") { db in
+            try db.create(table: "projectNote") { t in
+                t.primaryKey("repositoryPath", .text)
+                t.column("repositoryName", .text).notNull()
+                t.column("building", .text).notNull().defaults(to: "")
+                t.column("nextStep", .text).notNull().defaults(to: "")
+                t.column("isPaused", .boolean).notNull().defaults(to: false)
+                t.column("updatedAt", .datetime).notNull()
+            }
+        }
+
         return migrator
     }
 }

@@ -135,3 +135,77 @@ func runActivityTests() {
         expectEqual(e.durationLabel, "under a minute")
     }
 }
+
+func runSessionImportTests() {
+    TestKit.suite("Sessions on the day")
+
+    // A session resumed across a week has a first timestamp days before its last.
+    // Rendering that as a 181-hour span — which it did — is nonsense on a timeline.
+    TestKit.test("a session is a point in time, not a span across days") {
+        var event = ActivityEvent(
+            kind: .agentSession,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            appName: "Claude Code",
+            metadata: ["messages": "14"]
+        )
+        event.endedAt = event.startedAt
+        expectEqual(event.durationLabel, "14 messages", "size is what was said")
+    }
+
+    TestKit.test("one message reads as one message") {
+        var event = ActivityEvent(
+            kind: .agentSession, startedAt: Date(), appName: "Codex",
+            metadata: ["messages": "1"]
+        )
+        event.endedAt = event.startedAt
+        expectEqual(event.durationLabel, "1 message")
+    }
+
+    // The home directory's last path component is the user's short name, and
+    // labelling a session "fu2ail" tells them nothing about where they were.
+    TestKit.test("the home directory is shown as ~") {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        expectEqual(SessionImporter.folderLabel(for: home), "~")
+        expectEqual(SessionImporter.folderLabel(for: "/Users/dev/code/acme"), "acme")
+    }
+
+    TestKit.test("re-importing the same session updates it rather than duplicating") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let moment = Date(timeIntervalSince1970: 1_700_000_000)
+
+        func session(about: String) -> ActivityEvent {
+            var e = ActivityEvent(
+                kind: .agentSession, startedAt: moment, appName: "Claude Code",
+                target: "acme", metadata: ["about": about],
+                externalId: "claude-code:abc123"
+            )
+            e.endedAt = moment
+            return e
+        }
+
+        _ = try store.upsertImportedActivity(session(about: "First title"))
+        _ = try store.upsertImportedActivity(session(about: "Revised title"))
+
+        let day = try store.activity(on: moment, minimumSeconds: 0)
+        expectEqual(day.count, 1, "one session, imported twice")
+        expectEqual(day.first?.metadata["about"], "Revised title", "latest wins")
+    }
+
+    // The machine may revise what it observed; what you wrote is yours.
+    TestKit.test("re-importing never overwrites your own note") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let moment = Date(timeIntervalSince1970: 1_700_000_000)
+        var event = ActivityEvent(
+            kind: .agentSession, startedAt: moment, appName: "Claude Code",
+            target: "acme", externalId: "claude-code:xyz"
+        )
+        event.endedAt = moment
+
+        let stored = try store.upsertImportedActivity(event)
+        _ = try store.annotate(activityId: stored.id, note: "figuring out the redesign")
+        _ = try store.upsertImportedActivity(event)
+
+        let day = try store.activity(on: moment, minimumSeconds: 0)
+        expectEqual(day.first?.note, "figuring out the redesign", "the note survives")
+    }
+}

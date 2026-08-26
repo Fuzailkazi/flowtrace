@@ -2,19 +2,20 @@ import SwiftUI
 import AppKit
 import FlowTraceCore
 
-/// "Why am I here?" — answered in one line, without leaving the page you're on.
+/// "Why am I here?" — answered where you are, so you never have to come back to
+/// the app to write it down.
 ///
-/// The whole interaction is: press the key, glance at what it already knows,
-/// type a few words, press Return. Anything longer and the person who forgets
-/// things won't do it.
+/// The note lands on the timeline entry for what you are doing *right now*. That
+/// is the whole point: the day fills in from wherever you happen to be.
 struct QuickCaptureView: View {
     @Bindable var model: AppModel
     let snapshot: FrontmostSnapshot
     let onFinish: () -> Void
 
     @State private var resolved: FrontmostSnapshot
+    @State private var current: ActivityEvent?
+    @State private var leadingUp: [ActivityEvent] = []
     @State private var note = ""
-    @State private var threadId: String?
     @State private var saved = false
     @FocusState private var focused: Bool
 
@@ -26,152 +27,176 @@ struct QuickCaptureView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            context
-            Divider()
+        VStack(alignment: .leading, spacing: Journal.Space.m) {
+            header
             if saved { confirmation } else { editor }
+            if !leadingUp.isEmpty, !saved { context }
         }
-        .padding(Theme.Space.l)
+        .padding(Journal.Space.l)
         .frame(width: 520, alignment: .leading)
-        .background(.regularMaterial)
-        .onAppear {
-            threadId = model.continueWhereYouLeftOff.first?.id
-            focused = true
-            resolveTab()
+        .background(Journal.card)
+        .onAppear(perform: load)
+    }
+
+    // MARK: - Where you are
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Right now")
+                .font(.observed(10.5, weight: .semibold))
+                .tracking(1.3)
+                .foregroundStyle(Journal.pen)
+
+            Text(resolved.summary)
+                .font(.journalTitle(22))
+                .foregroundStyle(Journal.ink)
+                .lineLimit(1)
+
+            HStack(spacing: 5) {
+                Text(resolved.appName)
+                if let detail = resolved.detail {
+                    Text("·").foregroundStyle(Journal.ruleFirm)
+                    Text(detail)
+                }
+                if let current, !current.isOpen == false {
+                    Text("·").foregroundStyle(Journal.ruleFirm)
+                    Text(current.durationLabel)
+                }
+            }
+            .font(.observed(11.5))
+            .foregroundStyle(Journal.inkSoft)
         }
     }
 
-    /// What FlowTrace already knows, so the user doesn't retype it.
-    private var context: some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: resolved.isBrowser ? "safari" : "app.dashed")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(resolved.summary)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                HStack(spacing: 5) {
-                    Text(resolved.appName)
-                    if let detail = resolved.detail {
-                        Text("·")
-                        Text(detail)
-                    }
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-            }
-            Spacer()
-        }
-    }
+    // MARK: - The one field
 
     private var editor: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            TextField("Why are you here?", text: $note, axis: .vertical)
+        VStack(alignment: .leading, spacing: Journal.Space.s) {
+            TextField("why are you here?", text: $note)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
-                .lineLimit(1...4)
+                .font(.yourWords(17))
+                .foregroundStyle(Journal.ink)
                 .focused($focused)
                 .onSubmit(save)
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(Journal.paper, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8).strokeBorder(Journal.pen, lineWidth: 1)
+                )
 
-            HStack(spacing: Theme.Space.s) {
-                Picker("", selection: $threadId) {
-                    Text("New thread").tag(String?.none)
-                    ForEach(model.threads.filter { $0.status != .completed }) {
-                        Text($0.title).tag(String?.some($0.id))
-                    }
-                }
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(maxWidth: 240)
-
+            HStack(spacing: Journal.Space.s) {
+                Text("⏎ save").font(.observed(10.5)).foregroundStyle(Journal.inkSoft)
+                Text("esc cancel").font(.observed(10.5)).foregroundStyle(Journal.inkSoft)
                 Spacer()
-                Text("esc to cancel")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                Button("Save", action: save)
-                    .keyboardShortcut(.return, modifiers: [])
-                    .controlSize(.small)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(note.trimmingCharacters(in: .whitespaces).isEmpty)
+                Text(model.captureTrigger.displayString)
+                    .font(.observed(10.5, weight: .medium))
+                    .foregroundStyle(Journal.pen)
+                    .padding(.horizontal, 6).padding(.vertical, 1.5)
+                    .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
             }
         }
         .background {
-            // Escape dismisses without saving, from anywhere in the panel.
             Button("", action: onFinish)
                 .keyboardShortcut(.escape, modifiers: [])
                 .opacity(0)
         }
     }
 
+    /// What led here. Pre-existing context is what turns a blank box into a
+    /// prompt you only have to confirm.
+    private var context: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Just before this")
+                .font(.observed(10, weight: .semibold))
+                .tracking(1.1)
+                .foregroundStyle(Journal.inkSoft)
+
+            ForEach(leadingUp) { event in
+                HStack(alignment: .top, spacing: 7) {
+                    Text(event.startedAt, format: .dateTime.hour().minute())
+                        .font(.observed(10.5)).monospacedDigit()
+                        .foregroundStyle(Journal.inkSoft)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(event.target.map { "\(event.appName) · \($0)" } ?? event.appName)
+                            .font(.observed(12))
+                            .foregroundStyle(Journal.inkMid)
+                            .lineLimit(1)
+                        if let note = event.note, !note.isEmpty {
+                            Text("“\(note)”")
+                                .font(.yourWords(12.5))
+                                .foregroundStyle(Journal.inkMid)
+                                .lineLimit(1)
+                        } else if let asked = event.metadata["asked"]?
+                            .split(separator: "\n").last {
+                            Text(String(asked))
+                                .font(.yourWords(12.5))
+                                .foregroundStyle(Journal.inkSoft)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.top, Journal.Space.xs)
+    }
+
     private var confirmation: some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-            Text("Saved to \(model.thread(id: threadId ?? "")?.title ?? "FlowTrace")")
-                .font(.system(size: 13))
+        HStack(spacing: Journal.Space.s) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Journal.pen)
+            Text("Written down.").font(.observed(13)).foregroundStyle(Journal.ink)
             Spacer()
         }
+        .padding(.vertical, Journal.Space.s)
     }
 
     // MARK: - Actions
 
-    /// Fills in the tab details a moment after the panel is already on screen,
-    /// so AppleScript never delays it appearing.
-    private func resolveTab() {
+    private func load() {
+        focused = true
+        current = try? model.store.openActivity()
+        leadingUp = (try? model.store.activityLeadingUp(to: Date())) ?? []
+        note = current?.note ?? ""
+
+        // Enrich with the browser tab a moment later, so the panel appears at once.
         let snapshot = self.snapshot
         Task.detached(priority: .userInitiated) {
             let enriched = snapshot.resolvingBrowserTab()
-            await MainActor.run {
-                if enriched != snapshot { resolved = enriched }
-            }
+            await MainActor.run { if enriched != snapshot { resolved = enriched } }
         }
     }
 
     private func save() {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else { onFinish(); return }
 
         do {
-            // The note IS the intent — it's the sentence you'd otherwise lose.
-            let target = try resolveThread(intent: text)
-
-            if let url = resolved.url, !url.isEmpty {
-                _ = try model.store.attach(tabs: [
-                    BrowserContext(
-                        browser: resolved.appName,
-                        pageTitle: resolved.pageTitle ?? url,
-                        url: url,
-                        note: text
-                    ),
-                ], to: target)
+            // Annotate the span you are inside. If the recorder isn't running
+            // there is nothing to annotate, so make the entry too — a note should
+            // never be lost because capture happened to be off.
+            let target: ActivityEvent
+            if let current {
+                target = current
             } else {
-                _ = try model.store.addNote(Note(
-                    workThreadId: target,
-                    content: "\(text)\n\n— in \(resolved.appName)"
+                target = try model.store.beginActivity(ActivityEvent(
+                    kind: resolved.isBrowser ? .browserTab : .app,
+                    startedAt: Date(),
+                    appName: resolved.appName,
+                    bundleIdentifier: resolved.bundleIdentifier,
+                    target: resolved.pageTitle,
+                    url: resolved.url
                 ))
             }
 
-            threadId = target
+            _ = try model.store.annotate(activityId: target.id, note: text)
             model.refresh()
             saved = true
-            // Long enough to register, short enough not to be in the way.
             Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(650))
+                try? await Task.sleep(for: .milliseconds(600))
                 onFinish()
             }
         } catch {
             model.toast = Toast(message: error.localizedDescription, isError: true)
             onFinish()
         }
-    }
-
-    private func resolveThread(intent: String) throws -> String {
-        if let threadId, model.thread(id: threadId) != nil { return threadId }
-        // No thread chosen: the note becomes a new one, titled by what you typed.
-        let thread = try model.store.create(WorkThread(
-            title: AgentSession.condense(intent, limit: 60),
-            intent: intent
-        ))
-        return thread.id
     }
 }

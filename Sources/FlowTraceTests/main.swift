@@ -15,6 +15,7 @@ runServerTests()
 runCORSTests()
 runBriefTests()
 runActivityTests()
+runSessionImportTests()
 
 
 TestKit.summarize()

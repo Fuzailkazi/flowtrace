@@ -53,6 +53,11 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
     /// Free detail per kind: message counts, dirty file counts, session ids.
     public var metadata: [String: String]
 
+    /// Stable identity for things imported from outside — an agent session id, a
+    /// commit hash. Lets the day be rebuilt from transcripts repeatedly without
+    /// the same session appearing twice.
+    public var externalId: String?
+
     public init(
         id: String = UUID().uuidString,
         kind: ActivityKind,
@@ -64,7 +69,8 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
         url: String? = nil,
         note: String? = nil,
         noteAt: Date? = nil,
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        externalId: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -77,6 +83,7 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
         self.note = note
         self.noteAt = noteAt
         self.metadata = metadata
+        self.externalId = externalId
     }
 
     /// True when nothing explains why this happened — the only thing the timeline
@@ -92,7 +99,14 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
     public var isOpen: Bool { endedAt == nil }
 
     /// "1h 04m", "12m", "still open" — short enough to sit at the end of a row.
+    ///
+    /// An imported session is a point, not a span: its size is how much was said,
+    /// not how long the transcript happened to stretch across.
     public var durationLabel: String {
+        if kind == .agentSession {
+            guard let messages = metadata["messages"] else { return "" }
+            return "\(messages) message\(messages == "1" ? "" : "s")"
+        }
         if isOpen, duration < 8 * 3600 { return "still open" }
         let minutes = Int(duration / 60)
         if minutes < 1 { return "under a minute" }
@@ -119,5 +133,6 @@ extension ActivityEvent: FetchableRecord, MutablePersistableRecord {
         public static let startedAt = Column("startedAt")
         public static let endedAt = Column("endedAt")
         public static let note = Column("note")
+        public static let externalId = Column("externalId")
     }
 }

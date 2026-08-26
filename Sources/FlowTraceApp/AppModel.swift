@@ -4,7 +4,9 @@ import FlowTraceCore
 
 /// What the main content area is showing.
 enum Route: Hashable {
-    /// The day you can read — the app's main screen.
+    /// What is running right now — the app's front door.
+    case now
+    /// The day you can read.
     case timeline
     case dashboard
     case status(ThreadStatus)
@@ -78,7 +80,7 @@ final class AppModel {
     var recentTabs: [BrowserContext] = []
     var recentCode: [CodeContext] = []
 
-    var route: Route = .timeline
+    var route: Route = .now
     var searchText = ""
     var searchResults: [SearchHit] = []
 
@@ -129,6 +131,24 @@ final class AppModel {
 
     func startRecordingIfEnabled() {
         if isRecording { recorder.start() }
+        importSessions()
+    }
+
+    /// Bumped whenever the day changes, so the timeline and the rail refresh
+    /// together without either polling the other.
+    var activityRevision = 0
+
+    /// Folds today's agent transcripts into the day. Cheap and idempotent, so it
+    /// runs on launch and on a slow timer rather than needing to be exact.
+    func importSessions(on day: Date = Date()) {
+        let store = self.store
+        Task.detached(priority: .utility) {
+            let cache = StoreSessionCache(store: store)
+            let count = SessionImporter().importSessions(on: day, into: store, cache: cache)
+            cache.flush()
+            guard count > 0 else { return }
+            await MainActor.run { [weak self] in self?.activityRevision += 1 }
+        }
     }
 
     /// Bumped to force the trigger to re-register when nothing about it changed

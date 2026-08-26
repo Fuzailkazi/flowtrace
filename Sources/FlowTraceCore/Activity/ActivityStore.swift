@@ -152,3 +152,59 @@ extension Store {
         }
     }
 }
+
+extension Store {
+    /// Inserts or refreshes an imported event, keyed on its external identity.
+    ///
+    /// The user's own note is never overwritten by a re-import — the machine may
+    /// revise what it observed, but what you wrote is yours.
+    @discardableResult
+    public func upsertImportedActivity(_ event: ActivityEvent) throws -> ActivityEvent {
+        guard let externalId = event.externalId else { return try recordActivity(event) }
+
+        return try database.writer.write { db in
+            if var existing = try ActivityEvent
+                .filter(ActivityEvent.Columns.externalId == externalId)
+                .fetchOne(db) {
+                existing.startedAt = event.startedAt
+                existing.endedAt = event.endedAt
+                existing.appName = event.appName
+                existing.target = event.target
+                existing.metadata = event.metadata
+                try existing.update(db)
+                return existing
+            }
+            var fresh = event
+            try fresh.insert(db)
+            return fresh
+        }
+    }
+}
+
+extension Store {
+    /// The span you are inside right now, if any.
+    public func openActivity() throws -> ActivityEvent? {
+        try database.writer.read { db in
+            try ActivityEvent
+                .filter(ActivityEvent.Columns.endedAt == nil)
+                .order(ActivityEvent.Columns.startedAt.desc)
+                .fetchOne(db)
+        }
+    }
+
+    /// What was happening just before a moment — the few entries that give a
+    /// stray tab its context.
+    public func activityLeadingUp(
+        to moment: Date, within minutes: Double = 20, limit: Int = 3
+    ) throws -> [ActivityEvent] {
+        let from = moment.addingTimeInterval(-minutes * 60)
+        return try database.writer.read { db in
+            try ActivityEvent
+                .filter(ActivityEvent.Columns.startedAt >= from)
+                .filter(ActivityEvent.Columns.startedAt < moment)
+                .order(ActivityEvent.Columns.startedAt.desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+}

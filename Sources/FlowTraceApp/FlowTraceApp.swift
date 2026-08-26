@@ -192,7 +192,9 @@ struct MainWindow: View {
             // One screen. The sidebar that used to live here — All / Active /
             // Paused / Completed — was the grammar of a task manager, and it told
             // everyone the wrong thing about what this is.
-            if model.route == .timeline {
+            if model.route == .now {
+                NowView(model: model)
+            } else if model.route == .timeline {
                 TimelineView(model: model)
             } else {
                 DetailPane(model: model)
@@ -228,18 +230,22 @@ struct MainWindow: View {
     @ToolbarContentBuilder
     private var chrome: some ToolbarContent {
         ToolbarItemGroup {
-            if model.route != .timeline {
-                Button {
-                    model.route = .timeline
-                } label: {
-                    Label("Today", systemImage: "chevron.left")
-                }
-                .help("Back to today")
+            Picker("", selection: Binding(
+                get: { model.route == .timeline ? 1 : 0 },
+                set: { model.route = $0 == 1 ? .timeline : .now }
+            )) {
+                Text("Now").tag(0)
+                Text("Today").tag(1)
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 150)
+            .disabled(model.route != .now && model.route != .timeline)
 
             Spacer()
 
             Menu {
+                Button("Now") { model.route = .now }
                 Button("Today") { model.route = .timeline }
                 Divider()
                 Button("Unfinished work") { model.route = .dashboard }
@@ -267,6 +273,8 @@ struct DetailPane: View {
             SearchResultsView(model: model)
         } else {
             switch model.route {
+            case .now:
+                NowView(model: model)
             case .timeline:
                 TimelineView(model: model)
             case .dashboard:

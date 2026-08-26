@@ -13,7 +13,7 @@ struct FlowTraceCLI: ParsableCommand {
         and never finished.
         """,
         version: "0.1.0",
-        subcommands: [Scan.self, List.self, Attach.self, Resume.self, Serve.self, Seed.self, Brief.self, Verdict.self]
+        subcommands: [Scan.self, List.self, Attach.self, Resume.self, Serve.self, Seed.self, Brief.self, Verdict.self, Now.self]
     )
 }
 
