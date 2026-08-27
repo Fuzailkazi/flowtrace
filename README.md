@@ -1,198 +1,194 @@
 # FlowTrace
 
-**You start things and don't finish them. FlowTrace finds those things.**
+**You have eleven coding agents running. Seven have been idle for four days. Can you say what any of them were doing?**
 
-A macOS menubar app that reads your coding-agent transcripts and git state —
-locally, read-only — and works out which pieces of work were started and never
-finished. Then it links them to the tabs, repositories and notes that belong
-with them, so you can pick one back up without reconstructing it from memory.
+FlowTrace is a macOS app that shows you what is actually happening on your
+machine — which agents are running and where each one stopped, which servers are
+still holding ports, what you had open — and lets you attach *why* to any of it,
+in one keystroke, without leaving what you're doing.
+
+It reads only what your machine already wrote down. No screen recording, no OCR,
+no keystroke logging, and nothing ever leaves the device.
 
 ```
-Read 118 agent sessions across 16 repositories in 3.5s.
+15 places · 7 left running and forgotten
 
-9 pieces of unfinished work:
+●  gtm                                                     just now
+   waht kind of content should i post from my account i.e fuzailkazi_ on x
 
-  Redo previous changes · cc
-  cc · scn-4    12 uncommitted files  ·  last commit 29d ago  ·  2 Claude Code sessions
-  last asked: push to gh
-  ~/armor/videos/cc
+●  aum                                                      29m ago
+   add more animation make this site a genz website it looks liek a 90s webstie
 
-  Replace ChatGPT key with Gemini API key · cap
-  cap · main    3 uncommitted files  ·  last commit 23d ago  ·  2 Claude Code + Codex sessions
-  last asked: what env should i share w vercel fr deployment
-  ~/projects/nl/cap
+○  tulu                                                4d ago · idle
+   give me a good detail so that i knwo what i have to say on the loom video
+   listening  :3000
+   ● what are you building here?
 ```
 
-That output took no configuration and no typing. It's the first thing FlowTrace
-shows you.
+That is real output from a real machine, and the `tulu` line is the point: an
+agent abandoned four days ago **and** a dev server still holding port 3000. Two
+facts that mean little apart and a lot together.
 
-## Why this exists
+## Three surfaces
 
-The problem isn't too many tabs. It's that the **intention** behind them is
-gone. At the moment you open a tab or start an agent session you know exactly
-why. Three days later you have fourteen tabs, six repositories with uncommitted
-changes, and no idea which belong together.
+**Now** — what's happening this second. Running agents, what you last asked each
+one, how long since anything moved, and every local server with the project it
+was started from. Grouped by place, because work happens in places: an agent in
+`tulu` and a server started in `tulu/frontend` are one thing, not two.
 
-Most tools in this space ask you to organise your work first. That's the part
-nobody does. FlowTrace inverts it: **it proposes, you confirm.** The dashboard
-is already full the first time you open it.
+**Why** — intent, captured where you are. Press the shortcut anywhere and a small
+panel appears over what you're doing, already knowing where you are and what led
+there. Type a sentence, press return, and it lands on the timeline. **The note
+outlives the thing** — close the tab, quit the agent, reboot; next week you can
+still find out why you opened it.
 
-## What it does
+**Then** — what you're building in each place. Written once against the
+repository rather than a session or a process, so it survives everything that
+ends.
 
-- **Finds abandoned work.** Cross-references Claude Code and Codex CLI
-  transcripts against git state to find repositories that are dirty, unpushed,
-  and cold — and tells you the last thing you asked an agent to do there.
-- **Work Threads.** The primary object is an intention, not a tab: title, why
-  you're doing it, what's next, what's blocking it. Tabs, repositories and agent
-  sessions hang off a thread.
-- **Explicit capture.** Grab the front browser window's tabs with a reason
-  attached. Attach a repository from the app, or `flowtrace attach` from the
-  terminal.
-- **Resume.** One screen answering: what was I doing, what changed since, what
-  comes next.
-- **Search.** Full-text across titles, intents, next steps, blockers, notes,
-  page titles, URLs, repository names and agent names.
+## What it reads, and what it refuses to
 
-## Privacy
+FlowTrace only ever reads things that already exist on disk:
 
-FlowTrace is local software. It has no server to talk to.
+| It reads | It does not |
+|---|---|
+| Which app is frontmost (no permission needed) | Record your screen |
+| The focused window's title (Accessibility) | OCR anything |
+| The active browser tab's title and URL (Automation) | Log keystrokes |
+| Coding-agent transcripts your agents wrote themselves | Attach to or inject into any process |
+| Git state via four read-only commands | Write to any repository |
+| Which processes are listening on which ports | Send anything anywhere |
 
-- **FlowTrace never sends anything anywhere.** There is no HTTP client in the
-  codebase — no telemetry, no crash reporting, no model API. It does *listen* on
-  `127.0.0.1` when you switch the browser-extension endpoint on, so that the
-  extension and CLI can hand it captures; that socket is bound to loopback, is off
-  by default, and every route but `/health` requires a bearer token.
-- **No account, no sync, no telemetry.**
-- **Nothing is scanned until you say so.** First run lists the exact directories
-  it wants to read and reads nothing until you tick them.
-- **Read-only.** FlowTrace runs `git rev-parse`, `git status`, `git log` and
-  `git rev-list`. It never checks out, stashes, commits or fetches.
-- **Transcripts:** working directory, branch, timestamps, the session's own
-  title, and the prompts *you* typed. Assistant replies, file contents and tool
-  output are skipped.
-- **Browser tabs:** page title and URL only. Never page contents, cookies, form
-  values or credentials — and no browser is launched just to be read.
-- Everything lives in one SQLite file at
-  `~/Library/Application Support/FlowTrace/flowtrace.sqlite`. Settings has
-  Reveal in Finder, Export to JSON/Markdown, and Delete all.
+**No network requests.** There is no HTTP client in the codebase — no telemetry,
+no crash reporting, no model API. It *listens* on `127.0.0.1` when you switch the
+browser-extension endpoint on, so the extension and CLI can hand it captures;
+that socket is loopback-bound, off by default, and token-gated on every route but
+`/health`.
+
+**Nothing is recorded until you switch it on**, nothing while the screen is
+locked or you've stepped away, and FlowTrace never records itself. Everything
+lives in one SQLite file you can open yourself:
+
+```
+~/Library/Application Support/FlowTrace/flowtrace.sqlite
+```
+
+Settings has Reveal in Finder, Forget today, Export to JSON or Markdown, and
+Delete all.
+
+**Credentials are stripped before they are stored.** Prompts are the one free-text
+input, and free text contains whatever you pasted — a scan of `~/.claude/projects`
+on the machine this was built on found five live API keys sitting in prompts. Keys,
+tokens, JWTs and database URLs with passwords are redacted at the point text
+leaves the transcript, leaving the sentence around them readable.
 
 ## Install
 
 Requires macOS 14+ and the Xcode **Command Line Tools** — not Xcode.
 
 ```bash
-git clone https://github.com/YOURNAME/flowtrace
+git clone https://github.com/Fuzailkazi/flowtrace
 cd flowtrace
 ./Scripts/bundle.sh release
 cp -R dist/FlowTrace.app /Applications/
 cp dist/flowtrace /usr/local/bin/          # optional CLI
 ```
 
-Builds are ad-hoc signed, so macOS will quarantine the app on a machine that
-didn't build it:
+Builds are ad-hoc signed, so macOS quarantines the app on a machine that didn't
+build it:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/FlowTrace.app
 ```
 
-To produce a distributable build, set `FLOWTRACE_SIGN_IDENTITY` to a Developer
-ID before running `bundle.sh`.
+Set `FLOWTRACE_SIGN_IDENTITY` to a Developer ID before running `bundle.sh` to
+produce a distributable build.
 
-## The brief
+## Using it
 
-The thing FlowTrace is actually for. Run it in any repository:
+**The app** opens on *Now*. The `Now / Today` switch moves between live state and
+the day you can read.
 
-```bash
-flowtrace brief
-```
+**The shortcut** is `⌥Space` by default, and configurable in Settings — click the
+field and press whatever you want. It can also be a bare modifier tap (left ⌥ on
+its own), which needs Accessibility and can misfire; double-tap is steadier. If
+another app already owns your combination, Settings says so instead of leaving a
+dead key.
 
-```
-You worked on refund 10 days ago, on branch main.
-That session was about: Run project on localhost.
-You left 15 uncommitted files (IntentTrace.jsx, intent.js, app.js), and 8 commits
-not yet pushed.
-Your last commit was "Expand support-mcp to 20 tools and stage policy ownership".
-
-The last things you asked an agent in this repository:
-  · If I have multiple agents, how would that work?
-  · run this project on localhost
-```
-
-Better still, have it appear on its own. `./Scripts/install-hook.sh` adds a
-`SessionStart` hook so the brief is handed to Claude Code whenever you start it in
-a repository you left something in — no shortcut to remember, no app to open.
-`./Scripts/uninstall-hook.sh` removes it.
-
-It stays quiet unless it has something to say: nothing if you were here in the
-last two hours, nothing if the tree is clean, nothing for scratch worktrees, and
-nothing for work old enough that it is over rather than paused. Credential-shaped
-strings are stripped from prompts before they reach the brief — it is going into
-an agent's context, so a leaked key would travel further than one sitting in a
-local file.
-
-Runs in about 80ms, because a repository's transcripts are found by directory name
-rather than by reading every transcript on the machine.
-
-## CLI
+**The CLI** works whether or not the app is running:
 
 ```bash
-flowtrace brief                 # where you left this repository
-flowtrace verdict win|loss      # did the brief beat what you'd have typed?
-flowtrace verdict --report      # the tally
-flowtrace scan                  # find unfinished work
-flowtrace scan --cold-days 14   # only things untouched for two weeks
-flowtrace scan --json           # machine-readable
-flowtrace list                  # your threads
-flowtrace attach --thread oauth --note "why this matters"
-flowtrace resume oauth          # everything you need to pick it back up
-flowtrace serve                 # capture endpoint without the app
-flowtrace seed                  # realistic sample data (scratch db by default)
+flowtrace now         # what's running, grouped by place
+flowtrace brief       # where you left this repository, ready to hand to an agent
+flowtrace scan        # repositories with unfinished work in them
+flowtrace resume <x>  # everything you need to pick a thread back up
+flowtrace attach      # attach this repository to a thread
+flowtrace serve       # the capture endpoint, without the app
 ```
 
-`⌥Space` opens capture from anywhere, without needing Accessibility permission.
+`./Scripts/install-hook.sh` registers a `SessionStart` hook so `flowtrace brief`
+is handed to Claude Code whenever you start it in a repository you left something
+in. It stays silent unless it has something to say — nothing if you were here in
+the last two hours, nothing for a clean tree, nothing for scratch worktrees.
 
-The CLI writes directly to the same database, so it works whether or not the app
-is running.
+## How some of it works
 
-## Browser extension (optional)
+A few things were harder than they look, and the notes are in the code:
 
-AppleScript capture covers the common case with nothing to install. The
-extension adds what AppleScript can't do: capture a tab *with its reason* at the
-moment you open it, and a toolbar badge showing that the current tab is already
-filed under a thread.
+**Spans, not points.** Forty alt-tabs must become one timeline entry, not forty.
+Staying put extends a span; nipping to Slack and back within five minutes resumes
+the old one rather than splitting your morning into three lines.
 
-1. FlowTrace → Settings → Browser extension → switch the endpoint on, copy the token.
-2. `chrome://extensions` → Developer mode → Load unpacked → select `Extension/`.
-3. Extension options → paste the port and token → Save and test.
+**`lsof` lies about failure.** It exits non-zero whenever any one of its
+selections matches nothing — so `-c claude -c codex` with no Codex running
+reports failure on a perfectly good read. It also only saw four of seventeen
+running agents, because it cannot inspect every process. Discovery uses `pgrep`;
+one batched `lsof -p` resolves the directories.
 
-The endpoint binds to `127.0.0.1` only and every request needs the bearer token.
+**Transcript tails.** Reading each agent transcript end-to-end cost two seconds
+across eleven agents. Only the tail is read, widening from 512KB to 4MB when a
+long agent turn has pushed the last human prompt out of reach. 2.0s → 0.6s.
+
+**`isMeta`.** Claude Code writes injected skill bodies and slash-command
+expansions as user turns. They are indistinguishable from you until you check
+that flag — before FlowTrace honoured it, proposals came out titled *"Base
+directory for this skill: …"*.
+
+**`/var` is not `/private/var`.** Foundation's `resolvingSymlinksInPath()`
+deliberately leaves that pair alone; `git rev-parse` resolves it. Two spellings of
+one directory compared as two different repositories until every path went
+through `realpath`.
 
 ## Architecture
 
 ```
 Sources/
   FlowTraceCore/     no UI — models, SQLite store, FTS5 search, git probe,
-                     agent adapters, detector, AppleScript reader, local server
-  FlowTraceApp/      SwiftUI — MenuBarExtra + NavigationSplitView
-  flowtrace/         CLI
-  FlowTraceTests/    the suite
-Extension/           MV3 extension
+                     agent adapters, live process reader, activity recorder,
+                     AppleScript tab reader, loopback server
+  FlowTraceApp/      SwiftUI — Now, the day timeline, quick-capture panel
+  flowtrace/         the CLI
+  FlowTraceTests/    101 tests
+Extension/           MV3 browser extension
 ```
 
-`FlowTraceApp` holds no business logic. Detection, parsing, git and storage live
-in `FlowTraceCore`, which is why the CLI and the app behave identically and why
-the logic is testable headlessly.
+Native Swift 6 and SwiftUI, built with Swift Package Manager and no Xcode.
+Two dependencies: GRDB for SQLite and Swift Argument Parser for the CLI. Nothing
+else — the loopback server is a plain BSD socket, which is what makes binding to
+`INADDR_LOOPBACK` a guarantee rather than a setting.
 
-Adding an agent means implementing `AgentAdapter` — `discoverSessions()`
-returning `[AgentSession]`. Nothing else changes. Cursor, OpenCode and Gemini CLI
-deliberately have no adapter: their local stores are thin or opaque, and a
-fragile parser that silently returns wrong data is worse than honest manual
-capture.
+`FlowTraceApp` holds no business logic, which is why the CLI and the app behave
+identically and why the logic is testable headlessly.
+
+Adding an agent means implementing one protocol method, `discoverSessions()`.
+Cursor, OpenCode and Gemini CLI deliberately have no adapter: their local stores
+are thin or opaque, and a parser that silently returns wrong data is worse than
+honest manual capture.
 
 ## Tests
 
 ```bash
-swift run flowtrace-tests
+./Scripts/test.sh
 ```
 
 The suite is an executable rather than an XCTest target, because XCTest ships
@@ -202,7 +198,18 @@ committed fixtures and temporary git repositories — never against your real
 
 ## Status
 
-Early. Built for one person's daily use first. Detection covers Claude Code and
-Codex CLI; everything else is manual capture behind a stable adapter interface.
+Early, and honest about it.
+
+**Working:** the Now view, the day timeline with inline annotation, ambient
+capture of apps and windows and tabs, agent session import, project notes,
+quick-capture panel, configurable shortcut, the CLI, the `SessionStart` hook,
+search, export, delete.
+
+**Not yet:** you can see seven forgotten agents but not stop them — seeing isn't
+acting, and that's the next thing worth building. "What did I do last time" and
+paused/resumed are unbuilt. Open apps and tabs appear in the timeline but not in
+Now.
+
+**Unverified:** light mode. Everything has been looked at in dark.
 
 MIT.
