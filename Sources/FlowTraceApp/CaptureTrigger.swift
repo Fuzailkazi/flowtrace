@@ -135,3 +135,15 @@ enum AccessibilityPermission {
         NSWorkspace.shared.open(url)
     }
 }
+
+
+/// Reading a browser's tabs needs Automation permission, granted per pair of
+/// apps: allowing FlowTrace to ask Chrome says nothing about Brave.
+enum AutomationPermission {
+    static func openSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+}

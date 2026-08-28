@@ -11,7 +11,21 @@ struct FrontmostSnapshot: Equatable {
     var pageTitle: String?
     var url: String?
 
-    var isBrowser: Bool { url != nil }
+    /// How many tabs are open in that window — the difference between "you were
+    /// on this page" and "you were on this page with eleven others".
+    var openTabCount: Int = 0
+    /// The browser was recognised but macOS wouldn't let us ask it anything.
+    var automationDenied = false
+
+    /// The app is a browser we know how to talk to, whether or not we managed to.
+    var isBrowser: Bool {
+        url != nil || automationDenied || matchedBrowser != nil
+    }
+
+    var matchedBrowser: SupportedBrowser? {
+        guard let bundleIdentifier else { return nil }
+        return SupportedBrowser.all.first { $0.bundleIdentifier == bundleIdentifier }
+    }
 
     /// One line describing where the user is, for the top of the panel.
     var summary: String {
@@ -37,15 +51,28 @@ struct FrontmostSnapshot: Equatable {
     ///
     /// Runs after the snapshot so the panel can appear immediately; the tab
     /// details fill in a moment later rather than delaying the window.
+    /// Reads the active tab, and how many others are open beside it.
+    ///
+    /// A denied Automation permission is recorded rather than swallowed. It used
+    /// to fall through to a bare app name, so a browser FlowTrace had never been
+    /// granted access to looked identical to one with no tabs — and there was
+    /// nothing to tell the user what was wrong or how to fix it.
     func resolvingBrowserTab() -> FrontmostSnapshot {
-        guard let bundleIdentifier,
-              let browser = SupportedBrowser.all.first(where: { $0.bundleIdentifier == bundleIdentifier }),
-              let tab = try? BrowserTabReader().activeTab(of: browser)
-        else { return self }
+        guard let browser = matchedBrowser else { return self }
 
         var resolved = self
-        resolved.pageTitle = tab.pageTitle
-        resolved.url = tab.url
+        let reader = BrowserTabReader()
+        do {
+            let tabs = try reader.tabsInFrontWindow(of: browser)
+            let active = tabs.first(where: \.isActive) ?? tabs.first
+            resolved.pageTitle = active?.pageTitle
+            resolved.url = active?.url
+            resolved.openTabCount = tabs.count
+        } catch let error as BrowserReadError {
+            if case .permissionDenied = error { resolved.automationDenied = true }
+        } catch {
+            // Not running, or the window went away — nothing to report.
+        }
         return resolved
     }
 }

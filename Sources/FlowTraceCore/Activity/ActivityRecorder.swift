@@ -42,6 +42,9 @@ public final class ActivityRecorder {
     /// Set when window titles are wanted but Accessibility hasn't been granted.
     public private(set) var wantsAccessibility = false
 
+    /// Browsers FlowTrace has met but is not allowed to ask about tabs.
+    public private(set) var browsersNeedingPermission: Set<String> = []
+
     public var captureWindowTitles = true
     public var captureBrowserTabs = true
 
@@ -126,12 +129,28 @@ public final class ActivityRecorder {
         }
 
         // Layer 3: for a browser, the tab is a better answer than the window title.
+        //
+        // Automation is granted per pair of apps, so being allowed to ask Chrome
+        // says nothing about Brave. A refusal used to fall through to a bare app
+        // name, making an unpermitted browser indistinguishable from one with
+        // nothing open; it is recorded now so Settings can offer the fix.
         if captureBrowserTabs,
-           let browser = SupportedBrowser.all.first(where: { $0.bundleIdentifier == bundleId }),
-           let tab = try? BrowserTabReader().activeTab(of: browser) {
-            event.kind = .browserTab
-            event.target = tab.pageTitle
-            event.url = tab.url
+           let browser = SupportedBrowser.all.first(where: { $0.bundleIdentifier == bundleId }) {
+            do {
+                let tab = try BrowserTabReader().activeTab(of: browser)
+                if let tab {
+                    event.kind = .browserTab
+                    event.target = tab.pageTitle
+                    event.url = tab.url
+                    browsersNeedingPermission.remove(browser.name)
+                }
+            } catch let error as BrowserReadError {
+                if case .permissionDenied = error {
+                    browsersNeedingPermission.insert(browser.name)
+                }
+            } catch {
+                // Not running, or no window — nothing to report.
+            }
         }
 
         try? store.beginActivity(event)

@@ -66,7 +66,8 @@ struct QuickCaptureView: View {
             Text(resolved.summary)
                 .font(.journalTitle(22))
                 .foregroundStyle(Journal.ink)
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 5) {
                 Text(resolved.appName)
@@ -74,14 +75,44 @@ struct QuickCaptureView: View {
                     Text("·").foregroundStyle(Journal.ruleFirm)
                     Text(detail)
                 }
-                if let current, !current.isOpen == false {
+                if resolved.openTabCount > 1 {
+                    Text("·").foregroundStyle(Journal.ruleFirm)
+                    Text("\(resolved.openTabCount) tabs open")
+                }
+                if let current, current.isOpen {
                     Text("·").foregroundStyle(Journal.ruleFirm)
                     Text(current.durationLabel)
                 }
             }
             .font(.observed(11.5))
             .foregroundStyle(Journal.inkSoft)
+
+            if resolved.automationDenied { automationNotice }
         }
+    }
+
+    /// A browser FlowTrace has never been granted access to looks exactly like a
+    /// browser with no tabs. Saying so, with the fix attached, is the difference
+    /// between a bug and a setup step.
+    private var automationNotice: some View {
+        HStack(spacing: Journal.Space.s) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(Journal.amber)
+            Text("FlowTrace can't read \(resolved.appName)'s tabs yet")
+                .font(.observed(11.5))
+                .foregroundStyle(Journal.amber)
+            Spacer()
+            Button("Allow…") {
+                AutomationPermission.openSettings()
+            }
+            .buttonStyle(.plain)
+            .font(.observed(11, weight: .medium))
+            .foregroundStyle(Journal.pen)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(Journal.amberSoft, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.top, 5)
     }
 
     // MARK: - The one field
@@ -191,15 +222,24 @@ struct QuickCaptureView: View {
             // never be lost because capture happened to be off.
             let target: ActivityEvent
             if let current {
+                // The span may have been opened before the tab could be read —
+                // the note should still land on the page, not on "Brave Browser".
+                if current.url == nil, let url = resolved.url {
+                    try model.store.describeActivity(
+                        id: current.id, target: resolved.pageTitle, url: url
+                    )
+                }
                 target = current
             } else {
                 target = try model.store.beginActivity(ActivityEvent(
-                    kind: resolved.isBrowser ? .browserTab : .app,
+                    kind: resolved.url != nil ? .browserTab : .app,
                     startedAt: Date(),
                     appName: resolved.appName,
                     bundleIdentifier: resolved.bundleIdentifier,
                     target: resolved.pageTitle,
-                    url: resolved.url
+                    url: resolved.url,
+                    metadata: resolved.openTabCount > 1
+                        ? ["tabsOpen": String(resolved.openTabCount)] : [:]
                 ))
             }
 

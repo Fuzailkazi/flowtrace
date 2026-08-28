@@ -73,3 +73,49 @@ func runBrowserTests() {
         expectEqual(context.host, "oauth.net")
     }
 }
+
+func runBrowserContextTests() {
+    TestKit.suite("Browser context in the capture panel")
+
+    let reader = BrowserTabReader()
+    let fs = "\u{1F}", rs = "\u{1E}"
+
+    // "You were on this page" and "you were on this page with eleven others" are
+    // different facts, and the second is often the more useful one.
+    TestKit.test("the whole window is read, so the other tabs can be counted") {
+        let raw = "Work\(rs)\(rs)"
+            + "Pencil — Untitled\(fs)https://pencil.com\(fs)1\(rs)"
+            + "logo design tools\(fs)https://google.com/search?q=logo\(fs)0\(rs)"
+            + "dribbble\(fs)https://dribbble.com\(fs)0\(rs)"
+        let tabs = reader.parse(raw, browser: "Brave Browser")
+
+        expectEqual(tabs.count, 3, "tabs in the window")
+        expectEqual(tabs.first(where: \.isActive)?.pageTitle, "Pencil — Untitled")
+    }
+
+    // Automation is granted per pair of apps, so being allowed to ask Chrome says
+    // nothing about Brave. This used to fall through to a bare app name, making a
+    // browser FlowTrace had never been permitted look identical to one with
+    // nothing open.
+    TestKit.test("a refusal is a distinct outcome, not an empty result") {
+        let denied = BrowserReadError.permissionDenied("Brave Browser")
+        expectContains(denied.errorDescription, "Brave Browser")
+        expectContains(denied.recoverySuggestion, "Automation")
+
+        let notRunning = BrowserReadError.notRunning("Safari")
+        expectNotContains(notRunning.recoverySuggestion, "Automation")
+    }
+
+    TestKit.test("every browser we claim to support has a real bundle identifier") {
+        for browser in SupportedBrowser.all {
+            expect(browser.bundleIdentifier.contains("."), "\(browser.name)")
+            expect(!browser.name.isEmpty)
+        }
+        // The ones on this machine, by identifier rather than by name.
+        let identifiers = Set(SupportedBrowser.all.map(\.bundleIdentifier))
+        for expected in ["com.brave.Browser", "com.google.Chrome",
+                         "company.thebrowser.dia", "com.apple.Safari"] {
+            expect(identifiers.contains(expected), "missing \(expected)")
+        }
+    }
+}

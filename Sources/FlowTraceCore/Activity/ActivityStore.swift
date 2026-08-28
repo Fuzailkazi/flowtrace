@@ -137,6 +137,23 @@ extension Store {
         }
     }
 
+    /// Fills in what an event was, once it becomes known.
+    ///
+    /// A span opens the moment you switch apps, but reading a browser tab takes
+    /// an AppleScript round trip — so the entry can exist before anyone knows it
+    /// was a page rather than just "Brave Browser".
+    public func describeActivity(id: String, target: String?, url: String?) throws {
+        try database.writer.write { db in
+            guard var event = try ActivityEvent.fetchOne(db, key: id) else { return }
+            if let target, !target.isEmpty { event.target = target }
+            if let url, !url.isEmpty {
+                event.url = url
+                if event.kind == .app { event.kind = .browserTab }
+            }
+            try event.update(db)
+        }
+    }
+
     /// Writes your reason onto an event. This is the point of the whole app.
     @discardableResult
     public func annotate(activityId: String, note: String) throws -> ActivityEvent? {
