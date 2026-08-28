@@ -28,6 +28,12 @@ struct NowView: View {
 
     private var forgotten: Int { projects.filter(\.isForgotten).count }
 
+    /// True when more than one kind of agent is running, which is the only time
+    /// naming it on each row tells the reader anything.
+    private var agentsAreMixed: Bool {
+        Set(state.agents.map(\.agent)).count > 1
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -87,7 +93,7 @@ struct NowView: View {
             }
             .font(.observed(12))
         }
-        .padding(.top, Journal.Space.l)
+        .padding(.top, 34)
         .padding(.bottom, Journal.Space.m)
         .overlay(alignment: .bottom) { Divider().overlay(Journal.ruleFirm) }
     }
@@ -109,12 +115,11 @@ struct NowView: View {
                     .font(.observed(14.5, weight: .semibold))
                     .foregroundStyle(Journal.ink)
 
-                ForEach(Array(Set(project.agents.map(\.agent))), id: \.self) { agent in
+                // The agent's name only when it isn't the same one on every row.
+                if agentsAreMixed, let agent = project.agents.first?.agent {
                     Text(agent.label)
-                        .font(.observed(10.5, weight: .medium))
-                        .foregroundStyle(Journal.pen)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
+                        .font(.observed(10.5))
+                        .foregroundStyle(Journal.inkSoft)
                 }
 
                 Spacer(minLength: Journal.Space.s)
@@ -136,9 +141,12 @@ struct NowView: View {
                     .help("Hide this project, or clear its note")
                 }
 
+                // Staleness is stated in words; it doesn't also need a colour.
+                // Amber belongs to one thing only, and spending it here left
+                // nothing to distinguish what actually wants attention.
                 Text(project.statusLabel)
                     .font(.observed(11))
-                    .foregroundStyle(project.isForgotten ? Journal.amber : Journal.inkSoft)
+                    .foregroundStyle(Journal.inkSoft)
             }
 
             if let prompt = project.lastPrompt {
@@ -226,19 +234,14 @@ struct NowView: View {
                 .foregroundStyle(Journal.ink)
                 .onTapGesture { begin(path: path, existing: note.building) }
 
-        } else {
-            Button {
-                begin(path: path, existing: "")
-            } label: {
-                HStack(spacing: Journal.Space.s) {
-                    Circle().fill(Journal.amber).frame(width: 6, height: 6)
-                    Text("what are you building here?")
-                        .font(.yourWords(14.5))
-                        .foregroundStyle(Journal.amber)
-                    Spacer()
-                }
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(Journal.amberSoft, in: RoundedRectangle(cornerRadius: 7))
+        } else if hovering == canonical {
+            // Only under the cursor. A filled bar on every row turns an
+            // invitation into wallpaper, and made amber — which is supposed to
+            // mean one thing — the loudest colour on the screen.
+            Button { begin(path: path, existing: "") } label: {
+                Text("say what you're building here")
+                    .font(.yourWords(14))
+                    .foregroundStyle(Journal.pen)
             }
             .buttonStyle(.plain)
         }

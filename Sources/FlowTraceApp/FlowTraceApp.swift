@@ -43,6 +43,9 @@ struct FlowTraceApp: App {
             .frame(minWidth: 900, minHeight: 560)
         }
         .defaultSize(width: 1120, height: 720)
+        // The standard titlebar is a grey band that doesn't match warm paper,
+        // and it read as a seam across the top of the window.
+        .windowStyle(.hiddenTitleBar)
         .commands { FlowTraceCommands(model: launch.model) }
 
         MenuBarExtra("FlowTrace", systemImage: "point.3.filled.connected.trianglepath.dotted") {

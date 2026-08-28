@@ -17,6 +17,7 @@ struct OpenTabsSection: View {
 
     @State private var expanded: Set<String> = []
     @State private var editing: String?
+    @State private var hovering: String?
     @State private var draft = ""
     @FocusState private var focused: Bool
 
@@ -119,6 +120,7 @@ struct OpenTabsSection: View {
             reason(for: tab, browser: browser)
         }
         .padding(.leading, 2)
+        .onHover { hovering = $0 ? tab.url : (hovering == tab.url ? nil : hovering) }
     }
 
     @ViewBuilder
@@ -149,17 +151,11 @@ struct OpenTabsSection: View {
                 .padding(.leading, 13)
                 .onTapGesture { begin(tab, existing: note) }
 
-        } else if tab.isActive {
+        } else if tab.isActive || hovering == tab.url {
             Button { begin(tab, existing: "") } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(Journal.amber).frame(width: 5, height: 5)
-                    Text("what is this for?")
-                        .font(.yourWords(13.5))
-                        .foregroundStyle(Journal.amber)
-                    Spacer()
-                }
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(Journal.amberSoft, in: RoundedRectangle(cornerRadius: 6))
+                Text("say what this is for")
+                    .font(.yourWords(13.5))
+                    .foregroundStyle(Journal.pen)
             }
             .buttonStyle(.plain)
             .padding(.leading, 13)

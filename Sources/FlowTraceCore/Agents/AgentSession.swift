@@ -83,28 +83,33 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
         return !startsWithDraggedPath(trimmed)
     }
 
-    /// Dragging a screenshot into an agent pastes an absolute temp path as the
-    /// prompt. It is a real turn, but as a line of "what you were asking" it is
-    /// unreadable — and the useful part is whatever you typed after it.
+    /// Dragging a file into an agent pastes its absolute path as the prompt.
+    ///
+    /// It is a real turn, but as a line of "what you were asking" it is
+    /// unreadable — the useful part is whatever you typed after it. Any absolute
+    /// path counts, not only temp directories: dragging from Downloads produced
+    /// "'/Users/you/Downloads/melodyloops-preview-chasing-halos-2m30s.mp3' use
+    /// this music and…", where every word worth reading came after the path.
     static func startsWithDraggedPath(_ text: String) -> Bool {
-        let head = text.trimmingCharacters(in: CharacterSet(charactersIn: "'\"`"))
-        return head.hasPrefix("/var/folders/")
-            || head.hasPrefix("/private/var/folders/")
-            || head.hasPrefix("/tmp/")
-            || head.hasPrefix("file://")
+        let head = text.trimmingCharacters(in: CharacterSet(charactersIn: "'\"` "))
+        return head.hasPrefix("/") || head.hasPrefix("file://") || head.hasPrefix("~/")
     }
 
     /// Strips a leading dragged-file path so the sentence after it survives.
     public static func withoutLeadingPath(_ text: String) -> String {
         guard startsWithDraggedPath(text) else { return text }
-        let scalars = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // The path ends at the closing quote, or the first whitespace after it.
-        if scalars.hasPrefix("'"), let end = scalars.dropFirst().firstIndex(of: "'") {
-            return String(scalars[scalars.index(after: end)...])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // A quoted path ends at its closing quote — the reliable case, because a
+        // dragged filename routinely contains spaces.
+        for quote in ["'", "\""] where trimmed.hasPrefix(quote) {
+            if let end = trimmed.dropFirst().firstIndex(of: Character(quote)) {
+                return String(trimmed[trimmed.index(after: end)...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
         }
-        if let space = scalars.firstIndex(of: " ") {
-            return String(scalars[space...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let space = trimmed.firstIndex(of: " ") {
+            return String(trimmed[space...]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return ""
     }

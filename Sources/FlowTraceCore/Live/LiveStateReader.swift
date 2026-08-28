@@ -66,8 +66,11 @@ public struct LiveStateReader: Sendable {
                            : .idle
 
                 if let prompt = lastPrompt(in: transcript.path) {
+                    // A dragged file pastes its path as the prompt; the sentence
+                    // after it is the part worth showing.
+                    let stripped = AgentSession.withoutLeadingPath(prompt)
                     // Prompts are free text and routinely contain pasted keys.
-                    let redacted = Redaction.redact(prompt)
+                    let redacted = Redaction.redact(stripped.isEmpty ? prompt : stripped)
                     if !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty {
                         live.lastPrompt = AgentSession.condense(redacted.text, limit: 90)
                     }

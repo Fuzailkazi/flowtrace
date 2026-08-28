@@ -168,3 +168,32 @@ func runBriefTests() {
         expect(!long.hasPrefix(short + "-"), "separator-anchored match must not collide")
     }
 }
+
+func runDraggedPathTests() {
+    TestKit.suite("Dragged files in prompts")
+
+    // Dragging from Downloads produced a prompt where every word worth reading
+    // came after an absolute path. Only temp directories were being stripped.
+    TestKit.test("any leading absolute path is stripped, not just temp ones") {
+        let cases = [
+            "'/Users/dev/Downloads/melodyloops-preview-chasing-halos-2m30s.mp3' use this music",
+            "'/var/folders/xx/T/TemporaryItems/Screenshot.png' this is scenario 4",
+            "\"/Users/dev/Desktop/a file with spaces.png\" make it match",
+        ]
+        for input in cases {
+            let stripped = AgentSession.withoutLeadingPath(input)
+            expect(!stripped.hasPrefix("/"), "still a path: \(stripped)")
+            expect(!stripped.contains(".mp3"), "kept the filename: \(stripped)")
+            expect(stripped.count > 4, "stripped too much: \(stripped)")
+        }
+    }
+
+    TestKit.test("a prompt with no path is left exactly as it was") {
+        let text = "now give me a full strategy on how we plan for armortools launch"
+        expectEqual(AgentSession.withoutLeadingPath(text), text)
+    }
+
+    TestKit.test("a bare path with nothing after it yields nothing to show") {
+        expectEqual(AgentSession.withoutLeadingPath("'/Users/dev/Downloads/x.png'"), "")
+    }
+}

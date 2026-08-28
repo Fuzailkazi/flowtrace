@@ -121,7 +121,7 @@ struct TimelineView: View {
                     .foregroundStyle(Journal.inkSoft)
             }
         }
-        .padding(.top, Journal.Space.l)
+        .padding(.top, 34)
         .padding(.bottom, Journal.Space.m)
         .overlay(alignment: .bottom) { Divider().overlay(Journal.ruleFirm) }
     }
