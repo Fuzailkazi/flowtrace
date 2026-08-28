@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var confirmingDeleteAll = false
     @State private var ignored: [String] = []
     @State private var accessibilityGranted = AccessibilityPermission.isGranted
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
     /// The permission is granted in System Settings, outside this app, so poll
     /// while the pane is open rather than making the user relaunch.
     private let permissionTick = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
@@ -16,6 +17,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                alwaysOnSection
                 recordingSection
                 shortcutSection
                 sources
@@ -117,6 +119,44 @@ struct SettingsView: View {
             }
         }
         .opacity(adapter.isAvailable ? 1 : 0.55)
+    }
+
+    // MARK: - Always on
+
+    /// A capture shortcut that only works when you remembered to launch the app
+    /// is not a capture shortcut. This section exists because the debug log
+    /// showed the trigger registering on every launch and never once firing.
+    private var alwaysOnSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            SectionHeader(title: "Always there", subtitle: "so the shortcut works")
+            Card {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Toggle(isOn: Binding(
+                        get: { launchAtLogin },
+                        set: { wanted in
+                            _ = LaunchAtLogin.set(wanted)
+                            launchAtLogin = LaunchAtLogin.isEnabled
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Start FlowTrace when I log in")
+                                .font(.system(size: 12, weight: .medium))
+                            Text(LaunchAtLogin.statusDescription)
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Divider()
+
+                    Text("Closing the window puts FlowTrace away rather than quitting it — "
+                         + "the shortcut only works while it's running. Quit properly from "
+                         + "the menubar or with ⌘Q.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     // MARK: - Recording

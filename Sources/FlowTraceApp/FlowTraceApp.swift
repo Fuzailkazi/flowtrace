@@ -3,6 +3,10 @@ import FlowTraceCore
 
 @main
 struct FlowTraceApp: App {
+    /// Keeps the app — and therefore the capture shortcut — alive when the
+    /// window is closed.
+    @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
+
     /// The database is the whole app. If it can't be opened there is no model to
     /// build, so that is a state the UI renders rather than a placeholder model
     /// standing in for one.

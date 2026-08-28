@@ -136,12 +136,15 @@ struct MenuBarContent: View {
             Divider()
 
             HStack {
-                Button("Why am I here?") {
+                Button("Add a note here") {
                     NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
                 }
                 Spacer()
                 Text(model.captureTrigger.displayString)
-                    .font(.system(size: 10)).foregroundStyle(.tertiary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
             }
             Button("Capture context…") {
                 activate()
