@@ -21,6 +21,7 @@ runSessionImportTests()
 runLiveProjectTests()
 runDeletionTests()
 runWrittenOnlyTests()
+runErasureTests()
 
 
 TestKit.summarize()

@@ -448,3 +448,82 @@ func runWrittenOnlyTests() {
         expectEqual(try store.allActivity(on: old, minimumSeconds: 0).count, 1, "kept")
     }
 }
+
+func runErasureTests() {
+    TestKit.suite("Removing what FlowTrace knows")
+
+    func populated() throws -> Store {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let now = Date()
+
+        let noted = try store.beginActivity(ActivityEvent(
+            kind: .app, startedAt: now, appName: "VS Code", target: "flowtrace"
+        ))
+        _ = try store.annotate(activityId: noted.id, note: "building the erase controls")
+        try store.beginActivity(ActivityEvent(
+            kind: .app, startedAt: now.addingTimeInterval(600), appName: "Slack"
+        ))
+        _ = try store.noteTab(
+            url: "https://pencil.com", title: "Pencil", browser: "Brave", note: "logo"
+        )
+        _ = try store.saveProjectNote(ProjectNote(
+            repositoryPath: "/p/acme", repositoryName: "acme", building: "the thing"
+        ))
+        _ = try store.create(WorkThread(title: "A thread"))
+        return store
+    }
+
+    // "Delete all data" used to leave three tables behind — every app used, every
+    // window title, every page visited, every note written — because the table
+    // list was a literal that nobody updated when tables were added.
+    TestKit.test("deleting everything leaves nothing behind, in any table") {
+        let store = try populated()
+        try store.deleteAllData()
+
+        let holdings = try store.holdings()
+        expect(holdings.isEmpty, "still holding: \(holdings)")
+        expectEqual(try store.allThreads().count, 0, "threads")
+        expectNil(try store.projectNote(for: "/p/acme"), "project note")
+        expectNil(try store.noteForTab(url: "https://pencil.com"), "page note")
+    }
+
+    // The distinction people actually want: erase the surveillance, keep the
+    // journal.
+    TestKit.test("erasing what was recorded automatically keeps what you wrote") {
+        let store = try populated()
+        let before = try store.holdings()
+        expect(before.rawActivity > 0, "precondition: something was recorded")
+
+        let removed = try store.deleteRawActivity()
+        expect(removed > 0, "removed \(removed)")
+
+        let after = try store.holdings()
+        expectEqual(after.rawActivity, 0, "automatic records gone")
+        expectEqual(after.writtenNotes, before.writtenNotes, "notes kept")
+        expectEqual(
+            try store.noteForTab(url: "https://pencil.com"), "logo", "page note kept"
+        )
+    }
+
+    TestKit.test("an imported session is not treated as surveillance") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        var session = ActivityEvent(
+            kind: .agentSession, startedAt: Date(), appName: "Claude Code",
+            externalId: "claude-code:keep"
+        )
+        session.endedAt = session.startedAt
+        _ = try store.upsertImportedActivity(session)
+
+        _ = try store.deleteRawActivity()
+        expectEqual(try store.holdings().agentSessions, 1, "sessions survive")
+    }
+
+    TestKit.test("holdings describe the store in the terms a person thinks in") {
+        let store = try populated()
+        let holdings = try store.holdings()
+        expect(holdings.writtenNotes >= 2, "notes: \(holdings.writtenNotes)")
+        expect(holdings.pagesVisited >= 1, "pages: \(holdings.pagesVisited)")
+        expectEqual(holdings.projectNotes, 1)
+        expect(!holdings.fileSizeLabel.isEmpty)
+    }
+}

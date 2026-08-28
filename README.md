@@ -73,8 +73,12 @@ lives in one SQLite file you can open yourself:
 ~/Library/Application Support/FlowTrace/flowtrace.sqlite
 ```
 
-Settings has Reveal in Finder, Forget today, Export to JSON or Markdown, and
-Delete all.
+Settings → **What FlowTrace knows** lists exactly what is held — notes you wrote,
+records made automatically, pages seen, agent sessions, project notes — and how
+large the file is. You can erase only what was recorded automatically and keep
+everything you wrote, forget a single day, forget one entry, or delete
+everything. The file's path is shown with a Reveal button, because deleting it
+yourself should always be an option.
 
 **Credentials are stripped before they are stored.** Prompts are the one free-text
 input, and free text contains whatever you pasted — a scan of `~/.claude/projects`

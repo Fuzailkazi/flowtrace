@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var accessibilityGranted = AccessibilityPermission.isGranted
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var browsers: [BrowserAccess.BrowserState] = []
+    @State private var holdings: Store.Holdings?
     /// The permission is granted in System Settings, outside this app, so poll
     /// while the pane is open rather than making the user relaunch.
     private let permissionTick = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
@@ -50,8 +51,9 @@ struct SettingsView: View {
             Button("Delete all data", role: .destructive) { deleteAll() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every thread, captured tab, repository, note and activity entry is removed. "
-                 + "This cannot be undone, and your own files are not touched.")
+            Text("Everything: your notes, every recorded app and page, every project "
+                 + "note, every thread. This cannot be undone. Your own files are not "
+                 + "touched.")
         }
     }
 
@@ -558,33 +560,112 @@ struct SettingsView: View {
 
     // MARK: - Data controls
 
+    /// What FlowTrace is holding, and how to get rid of any part of it.
+    ///
+    /// Deleting used to be a single button whose label was untrue — it left three
+    /// tables behind, including every app, window title and page it had recorded.
+    /// The point of listing holdings is that a delete control needs something
+    /// concrete to act on, and the user needs to know what they are agreeing to
+    /// keep.
     private var data: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionHeader(title: "Your data")
+            SectionHeader(
+                title: "What FlowTrace knows",
+                subtitle: holdings.map { "\($0.fileSizeLabel) on this Mac" } ?? nil
+            )
             Card {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    HStack(spacing: Theme.Space.s) {
-                        Button("Export as JSON") { export(markdown: false) }
-                        Button("Export as Markdown") { export(markdown: true) }
-                        Spacer()
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let holdings {
+                        VStack(spacing: Theme.Space.s) {
+                            holdingRow(
+                                "Notes you wrote", holdings.writtenNotes,
+                                "The reasons you typed. Never deleted automatically."
+                            )
+                            holdingRow(
+                                "Recorded automatically", holdings.rawActivity,
+                                "Apps and windows, kept two days so the panel knows what led where."
+                            )
+                            holdingRow(
+                                "Pages seen", holdings.pagesVisited,
+                                "Titles and addresses only — never page contents."
+                            )
+                            holdingRow(
+                                "Agent sessions", holdings.agentSessions,
+                                "Read from transcripts your agents wrote."
+                            )
+                            holdingRow(
+                                "Project notes", holdings.projectNotes,
+                                "What you said you were building, per repository."
+                            )
+                        }
                     }
-                    .controlSize(.small)
-                    Text("An export contains your threads, captures and notes — not the scan cache.")
-                        .font(.system(size: 11)).foregroundStyle(.tertiary)
 
                     Divider()
 
+                    // The distinction people actually want: erase the
+                    // surveillance, keep the journal.
                     HStack(spacing: Theme.Space.s) {
-                        Button("Rescan from scratch") { clearCache() }
+                        Button("Erase what was recorded automatically") {
+                            let removed = (try? model.store.deleteRawActivity()) ?? 0
+                            reload()
+                            model.toast = Toast(
+                                message: "Removed \(removed) automatic record\(removed == 1 ? "" : "s") — your notes are untouched"
+                            )
+                        }
+                        .controlSize(.small)
                         Spacer()
-                        Button("Delete all data…", role: .destructive) { confirmingDeleteAll = true }
+                    }
+
+                    HStack(spacing: Theme.Space.s) {
+                        Button("Forget today") {
+                            try? model.store.deleteActivity(on: Date())
+                            reload()
+                            model.toast = Toast(message: "Today's record deleted")
+                        }
+                        Button("Export first…") { export(markdown: false) }
+                        Spacer()
+                        Button("Delete everything…", role: .destructive) {
+                            confirmingDeleteAll = true
+                        }
                     }
                     .controlSize(.small)
-                    Text("Rescanning from scratch forgets which session files were already read. "
-                         + "It changes nothing in your repositories.")
-                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("It all lives in one file. You can delete it yourself.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                        HStack(spacing: Theme.Space.s) {
+                            Text(FlowTraceDatabase.defaultURL.path)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1).truncationMode(.middle)
+                            Button("Reveal") {
+                                NSWorkspace.shared.activateFileViewerSelecting(
+                                    [FlowTraceDatabase.defaultURL]
+                                )
+                            }
+                            .buttonStyle(.link).font(.system(size: 11))
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    private func holdingRow(_ title: String, _ count: Int, _ detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) {
+            Text("\(count)")
+                .font(.system(size: 14, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(count == 0 ? .tertiary : .primary)
+                .frame(width: 52, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 12, weight: .medium))
+                Text(detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
         }
     }
 
@@ -621,6 +702,7 @@ struct SettingsView: View {
 
     private func reload() {
         counts = (try? model.store.counts()) ?? [:]
+        holdings = try? model.store.holdings()
         ignored = ((try? model.store.ignoredPaths()) ?? []).sorted()
     }
 

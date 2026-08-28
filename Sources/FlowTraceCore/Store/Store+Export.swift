@@ -89,15 +89,35 @@ extension Store {
         return out
     }
 
-    /// Removes everything. Used by the delete-all control in Settings.
+    /// Removes everything.
+    ///
+    /// The table list is read from the database rather than written out here. It
+    /// used to be a literal, and three tables added later — every app you used,
+    /// every window title, every page you visited, and every note you wrote —
+    /// were silently left behind by a button labelled "Delete all data". A list
+    /// that has to be remembered is a list that will be forgotten.
     public func deleteAllData() throws {
         try database.writer.write { db in
-            for table in ["searchIndex", "timelineEvent", "note", "browserContext",
-                          "codeContext", "workThread", "threadProposal",
-                          "repoSnapshot", "scanCache", "ignoredPath"] {
+            for table in try Self.userTables(db) {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }
+    }
+
+    /// Every table FlowTrace owns: no migration bookkeeping, and no FTS shadow
+    /// tables, which are maintained by their parent and error on direct delete.
+    static func userTables(_ db: Database) throws -> [String] {
+        try String.fetchAll(db, sql: """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+              AND name NOT LIKE 'grdb_%'
+              AND name NOT LIKE '%_content'
+              AND name NOT LIKE '%_data'
+              AND name NOT LIKE '%_idx'
+              AND name NOT LIKE '%_docsize'
+              AND name NOT LIKE '%_config'
+            """)
     }
 
     /// Clears the scan memo so the next scan re-reads every session file.
@@ -117,6 +137,65 @@ extension Store {
                 "events": try TimelineEvent.fetchCount(db),
                 "proposals": try ThreadProposal.fetchCount(db),
             ]
+        }
+    }
+
+    /// What FlowTrace is holding, in the terms the user thinks in rather than in
+    /// table names. Shown in Settings so the delete controls have something
+    /// concrete to act on.
+    public struct Holdings: Sendable {
+        public var writtenNotes: Int
+        public var rawActivity: Int
+        public var pagesVisited: Int
+        public var agentSessions: Int
+        public var projectNotes: Int
+        public var fileSizeBytes: Int64
+
+        public var isEmpty: Bool {
+            writtenNotes + rawActivity + pagesVisited + agentSessions + projectNotes == 0
+        }
+
+        public var fileSizeLabel: String {
+            let megabytes = Double(fileSizeBytes) / 1_048_576
+            return megabytes < 1
+                ? String(format: "%.0f KB", Double(fileSizeBytes) / 1024)
+                : String(format: "%.1f MB", megabytes)
+        }
+    }
+
+    public func holdings() throws -> Holdings {
+        let size = (try? FileManager.default.attributesOfItem(
+            atPath: FlowTraceDatabase.defaultURL.path
+        )[.size] as? Int64) ?? 0
+
+        return try database.writer.read { db in
+            Holdings(
+                writtenNotes: try Int.fetchOne(db, sql:
+                    "SELECT count(*) FROM activityEvent WHERE note IS NOT NULL AND note != ''") ?? 0,
+                rawActivity: try Int.fetchOne(db, sql:
+                    "SELECT count(*) FROM activityEvent WHERE note IS NULL OR note = ''") ?? 0,
+                pagesVisited: try Int.fetchOne(db, sql:
+                    "SELECT count(DISTINCT url) FROM activityEvent WHERE url IS NOT NULL") ?? 0,
+                agentSessions: try Int.fetchOne(db, sql:
+                    "SELECT count(*) FROM activityEvent WHERE kind = 'agentSession'") ?? 0,
+                projectNotes: try ProjectNote.fetchCount(db),
+                fileSizeBytes: size ?? 0
+            )
+        }
+    }
+
+    /// Deletes everything recorded automatically, keeping everything you wrote.
+    ///
+    /// The distinction people actually want: erase the surveillance, keep the
+    /// journal.
+    @discardableResult
+    public func deleteRawActivity() throws -> Int {
+        try database.writer.write { db in
+            try db.execute(sql: """
+                DELETE FROM activityEvent
+                WHERE (note IS NULL OR note = '') AND kind != 'agentSession'
+                """)
+            return db.changesCount
         }
     }
 }
