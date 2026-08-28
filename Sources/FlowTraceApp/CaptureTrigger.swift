@@ -80,17 +80,38 @@ enum CaptureTrigger: Equatable, Codable, Sendable {
     // MARK: - Persistence
 
     private static let defaultsKey = "flowtrace.captureTrigger"
+    private static let chosenKey = "flowtrace.captureTriggerChosen"
+
+    /// Whether the user has actually picked a shortcut.
+    ///
+    /// Nothing is registered until they have. A silent default meant the key that
+    /// opens the note panel was one nobody chose, buried three sections into a
+    /// Settings pane reached through a "More" menu — so it may as well not have
+    /// been configurable at all.
+    static var hasBeenChosen: Bool {
+        UserDefaults.standard.bool(forKey: chosenKey)
+    }
+
+    /// The suggestion offered during setup. Only becomes the shortcut if the user
+    /// accepts it.
+    static let suggestion = CaptureTrigger.chord(HotKeyShortcut(
+        keyCode: UInt32(kVK_ANSI_N),
+        carbonModifiers: UInt32(controlKey | optionKey),
+        keyLabel: "N"
+    ))
 
     static func load() -> CaptureTrigger {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
               let decoded = try? JSONDecoder().decode(CaptureTrigger.self, from: data)
-        else { return .default }
+        else { return suggestion }
         return decoded
     }
 
+    /// Persists the choice and records that one was made.
     func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
         UserDefaults.standard.set(data, forKey: Self.defaultsKey)
+        UserDefaults.standard.set(true, forKey: Self.chosenKey)
     }
 }
 

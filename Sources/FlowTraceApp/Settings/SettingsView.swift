@@ -17,9 +17,9 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                shortcutSection
                 alwaysOnSection
                 recordingSection
-                shortcutSection
                 sources
                 extensionSection
                 storage
@@ -231,7 +231,12 @@ struct SettingsView: View {
 
     private var shortcutSection: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionHeader(title: "Shortcut", subtitle: "opens the \"why am I here?\" panel")
+            SectionHeader(
+                title: "Your shortcut",
+                subtitle: CaptureTrigger.hasBeenChosen
+                    ? "adds a note without opening FlowTrace"
+                    : "not set — nothing will happen until you pick one"
+            )
             Card {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     Picker("", selection: triggerKind) {

@@ -153,6 +153,13 @@ struct RootView: View {
         tapMonitor = nil
         model.shortcutFailure = nil
 
+        // Registering a shortcut the user never chose is how ⌥Space ended up
+        // claimed on their behalf. Nothing is taken until they pick one.
+        guard CaptureTrigger.hasBeenChosen else {
+            Diagnostics.log("no shortcut chosen yet — nothing registered")
+            return
+        }
+
         switch trigger {
         case .chord(let shortcut):
             let key = GlobalHotKey(shortcut: shortcut) {

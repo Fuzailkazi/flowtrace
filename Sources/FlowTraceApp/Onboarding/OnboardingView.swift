@@ -10,8 +10,9 @@ struct OnboardingView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    enum Step { case welcome, consent, scanning, review }
+    enum Step { case welcome, shortcut, consent, scanning, review }
     @State private var step: Step = .welcome
+    @State private var chosen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -32,6 +33,7 @@ struct OnboardingView: View {
     private var content: some View {
         switch step {
         case .welcome: welcome
+        case .shortcut: shortcutStep
         case .consent: consent
         case .scanning: scanning
         case .review: review
@@ -55,6 +57,63 @@ struct OnboardingView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(Theme.Space.xxl)
+    }
+
+    /// Picking the key is a setup step, not a preference.
+    ///
+    /// It is the one control the whole product hangs on — a note you can add
+    /// without opening the app — and leaving it to a default meant the key was
+    /// one nobody chose.
+    private var shortcutStep: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text("Pick a key for adding notes")
+                    .font(.system(size: 17, weight: .semibold))
+                Text("Press it anywhere — in a browser, in your editor, mid-sentence — "
+                     + "and a small panel appears over what you're doing. Type why you're "
+                     + "there, press return, and it's written down. You never open "
+                     + "FlowTrace to do it.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Card {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Your shortcut")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Click and press the combination you want.")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        ShortcutRecorder(shortcut: Binding(
+                            get: { model.lastChord },
+                            set: {
+                                model.lastChord = $0
+                                model.captureTrigger = .chord($0)
+                                chosen = true
+                            }
+                        ))
+                    }
+
+                    if let failure = model.shortcutFailure {
+                        Label(failure, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11)).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("Avoid ⌘Space and ⌥Space — Spotlight, Raycast and Alfred "
+                             + "commonly hold those, and macOS will let FlowTrace register "
+                             + "a key it then never receives.")
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
             Spacer()
         }
         .padding(Theme.Space.xxl)
@@ -210,8 +269,19 @@ struct OnboardingView: View {
             Spacer()
             switch step {
             case .welcome:
-                Button("Get started") { step = .consent }
+                Button("Get started") { step = .shortcut }
                     .buttonStyle(.borderedProminent)
+
+            case .shortcut:
+                Button(chosen ? "Use \(model.captureTrigger.displayString)"
+                              : "Use \(model.captureTrigger.displayString)") {
+                    // Accepting the suggestion is as deliberate as recording one.
+                    model.captureTrigger = model.captureTrigger
+                    model.captureTrigger.save()
+                    model.reregisterTrigger()
+                    step = .consent
+                }
+                .buttonStyle(.borderedProminent)
             case .consent:
                 Button(model.consent.anyEnabled ? "Scan my work" : "Continue without scanning") {
                     model.consent.save()

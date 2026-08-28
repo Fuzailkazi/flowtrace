@@ -140,11 +140,17 @@ struct MenuBarContent: View {
                     NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
                 }
                 Spacer()
-                Text(model.captureTrigger.displayString)
+                Text(CaptureTrigger.hasBeenChosen
+                     ? model.captureTrigger.displayString
+                     : "set a key")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(CaptureTrigger.hasBeenChosen ? .secondary : Color.orange)
                     .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                    .background(
+                        CaptureTrigger.hasBeenChosen
+                            ? Color.secondary.opacity(0.12) : Color.orange.opacity(0.15),
+                        in: RoundedRectangle(cornerRadius: 4)
+                    )
             }
             Button("Capture context…") {
                 activate()
