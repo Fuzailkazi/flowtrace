@@ -52,6 +52,11 @@ public struct CapturedTab: Identifiable, Hashable, Sendable {
         self.isActive = isActive
     }
 
+    /// Host only, for the compact line under a page title.
+    public var host: String {
+        URL(string: url)?.host()?.replacingOccurrences(of: "www.", with: "") ?? url
+    }
+
     public func asContext(note: String = "") -> BrowserContext {
         BrowserContext(
             browser: browser,

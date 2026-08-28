@@ -17,9 +17,14 @@ struct NowView: View {
     @State private var loading = true
     @State private var hovering: String?
     @State private var ignored: Set<String> = []
+    @State private var browsers: [LiveBrowser] = []
+    @State private var tabNotes: [String: String] = [:]
     @FocusState private var focused: Bool
 
     private let tick = Timer.publish(every: 8, on: .main, in: .common).autoconnect()
+    /// Reading every tab costs about half a second across three browsers — fine
+    /// occasionally, far too much at the rate the agent list refreshes.
+    private let browserTick = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     private var forgotten: Int { projects.filter(\.isForgotten).count }
 
@@ -36,14 +41,23 @@ struct NowView: View {
                     ForEach(projects) { project in
                         projectBlock(project)
                     }
+
+                    OpenTabsSection(
+                        model: model, browsers: browsers, notes: tabNotes,
+                        onNote: { tab, text in noteTab(tab, text) }
+                    )
                 }
             }
             .padding(.horizontal, Journal.Space.xl)
             .padding(.bottom, Journal.Space.xl)
         }
         .background(Journal.paper)
-        .task { await refresh() }
+        .task {
+            await refresh()
+            await refreshBrowsers()
+        }
         .onReceive(tick) { _ in Task { await refresh() } }
+        .onReceive(browserTick) { _ in Task { await refreshBrowsers() } }
     }
 
     // MARK: - Header
@@ -285,6 +299,38 @@ struct NowView: View {
             projects = state.projects(notes: notes).filter { !ignored.contains($0.path) }
         }
         editing = nil
+    }
+
+    /// A page's reason is keyed on its address, so it outlives the tab.
+    private func noteTab(_ tab: CapturedTab, _ text: String) {
+        do {
+            _ = try model.store.noteTab(
+                url: tab.url, title: tab.pageTitle, browser: tab.browser, note: text
+            )
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { tabNotes.removeValue(forKey: tab.url) }
+            else { tabNotes[tab.url] = trimmed }
+        } catch {
+            model.toast = Toast(message: error.localizedDescription, isError: true)
+        }
+    }
+
+    private func refreshBrowsers() async {
+        let store = model.store
+        let read = await Task.detached(priority: .utility) {
+            let open = LiveStateReader().readBrowsers()
+            var found: [String: String] = [:]
+            for browser in open {
+                for tab in browser.tabs {
+                    if let note = (try? store.noteForTab(url: tab.url)) ?? nil {
+                        found[tab.url] = note
+                    }
+                }
+            }
+            return (open, found)
+        }.value
+        browsers = read.0
+        tabNotes = read.1
     }
 
     /// Reading processes shells out, so it never happens on the main actor.

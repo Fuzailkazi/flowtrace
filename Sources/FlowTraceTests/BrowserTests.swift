@@ -119,3 +119,52 @@ func runBrowserContextTests() {
         }
     }
 }
+
+func runTabNoteTests() {
+    TestKit.suite("Notes on pages")
+
+    // The point of asking why you opened something is being able to find out
+    // later, when you no longer have it open. A note keyed on a tab or a window
+    // would die with them; keyed on the address it survives.
+    TestKit.test("a page's reason outlives the tab") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        _ = try store.noteTab(
+            url: "https://pencil.com", title: "Pencil — Untitled",
+            browser: "Brave Browser", note: "making a logo for flowtrace"
+        )
+        // The tab is gone; the reason is not.
+        expectEqual(try store.noteForTab(url: "https://pencil.com"),
+                    "making a logo for flowtrace")
+    }
+
+    TestKit.test("writing about the same page twice updates rather than duplicates") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        _ = try store.noteTab(url: "https://x.test", title: "X", browser: "Dia", note: "first")
+        _ = try store.noteTab(url: "https://x.test", title: "X", browser: "Dia", note: "second")
+
+        expectEqual(try store.notedTabs().count, 1, "one entry")
+        expectEqual(try store.noteForTab(url: "https://x.test"), "second")
+    }
+
+    TestKit.test("a page you never wrote about has no reason") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        expectNil(try store.noteForTab(url: "https://never-seen.test"))
+    }
+
+    TestKit.test("noted pages appear on the day you wrote them") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        _ = try store.noteTab(
+            url: "https://oauth.net/2/", title: "OAuth 2.0 spec",
+            browser: "Chrome", note: "the spec I keep re-finding"
+        )
+        let today = try store.activity(on: Date(), minimumSeconds: 0)
+        expect(today.contains { $0.url == "https://oauth.net/2/" }, "on the timeline")
+    }
+
+    TestKit.test("clearing a page's note removes the reason but keeps the record") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        _ = try store.noteTab(url: "https://y.test", title: "Y", browser: "Dia", note: "why")
+        _ = try store.noteTab(url: "https://y.test", title: "Y", browser: "Dia", note: "  ")
+        expectNil(try store.noteForTab(url: "https://y.test"), "reason cleared")
+    }
+}
