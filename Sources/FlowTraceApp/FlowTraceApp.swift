@@ -231,6 +231,8 @@ struct MainWindow: View {
         }
         .animation(.snappy(duration: 0.2), value: model.toast)
         .background(Journal.paper)
+        // Re-reads every colour when the theme changes.
+        .id(model.paletteRevision)
         .onReceive(NotificationCenter.default.publisher(for: .flowtraceNewThread)) { _ in
             showingNewThread = true
         }

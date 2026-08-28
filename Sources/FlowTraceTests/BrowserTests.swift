@@ -168,3 +168,64 @@ func runTabNoteTests() {
         expectNil(try store.noteForTab(url: "https://y.test"), "reason cleared")
     }
 }
+
+func runPaletteTests() {
+    TestKit.suite("Palettes")
+
+    TestKit.test("every palette defines every role in both appearances") {
+        for palette in Palette.all {
+            for (role, value) in [
+                ("paperLight", palette.paperLight), ("paperDark", palette.paperDark),
+                ("cardLight", palette.cardLight), ("cardDark", palette.cardDark),
+                ("inkLight", palette.inkLight), ("inkDark", palette.inkDark),
+                ("inkMidLight", palette.inkMidLight), ("inkMidDark", palette.inkMidDark),
+                ("ruleLight", palette.ruleLight), ("ruleDark", palette.ruleDark),
+                ("accentLight", palette.accentLight), ("accentDark", palette.accentDark),
+            ] {
+                expectEqual(value.count, 6, "\(palette.name).\(role) = \(value)")
+                expect(
+                    value.allSatisfy { $0.isHexDigit },
+                    "\(palette.name).\(role) isn't a hex colour: \(value)"
+                )
+            }
+        }
+    }
+
+    // A theme with the same ink and ground is unreadable, and the cheapest way to
+    // ship one is to typo a hex value.
+    TestKit.test("ink is never the same as the ground it sits on") {
+        for palette in Palette.all {
+            expect(palette.inkLight != palette.paperLight, "\(palette.name) light")
+            expect(palette.inkDark != palette.paperDark, "\(palette.name) dark")
+            expect(palette.accentLight != palette.paperLight, "\(palette.name) accent light")
+            expect(palette.accentDark != palette.paperDark, "\(palette.name) accent dark")
+        }
+    }
+
+    TestKit.test("dark grounds are dark and light grounds are light") {
+        func brightness(_ hex: String) -> Int {
+            let value = Int(hex, radix: 16) ?? 0
+            let r = (value >> 16) & 0xFF, g = (value >> 8) & 0xFF, b = value & 0xFF
+            return (r * 299 + g * 587 + b * 114) / 1000
+        }
+        for palette in Palette.all {
+            expect(brightness(palette.paperLight) > 180, "\(palette.name) light ground too dark")
+            expect(brightness(palette.paperDark) < 70, "\(palette.name) dark ground too light")
+            expect(brightness(palette.inkDark) > 180, "\(palette.name) dark ink too dim")
+            expect(brightness(palette.inkLight) < 80, "\(palette.name) light ink too pale")
+        }
+    }
+
+    TestKit.test("names and ids are unique, so selection can't be ambiguous") {
+        expectEqual(Set(Palette.all.map(\.id)).count, Palette.all.count, "ids")
+        expectEqual(Set(Palette.all.map(\.name)).count, Palette.all.count, "names")
+    }
+
+    // Semantic colours belong to the product, not the theme: a meaning that
+    // changes with the theme is not a meaning.
+    TestKit.test("an unknown stored palette falls back rather than failing") {
+        UserDefaults.standard.set("does-not-exist", forKey: "flowtrace.palette")
+        expectEqual(Palette.current.id, Palette.paper.id, "falls back to Paper")
+        UserDefaults.standard.removeObject(forKey: "flowtrace.palette")
+    }
+}

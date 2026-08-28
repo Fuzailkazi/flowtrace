@@ -262,7 +262,7 @@ struct NowView: View {
     // MARK: - Data
 
     private func colour(for project: LiveProject) -> Color {
-        if project.agents.contains(where: { $0.state == .working }) { return .green }
+        if project.agents.contains(where: { $0.state == .working }) { return Journal.live }
         if project.agents.contains(where: { $0.state == .waiting }) { return Journal.pen }
         return Journal.ruleFirm
     }

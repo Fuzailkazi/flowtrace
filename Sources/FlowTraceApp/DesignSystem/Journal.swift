@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import FlowTraceCore
 
 /// The journal palette.
 ///
@@ -9,36 +10,38 @@ import AppKit
 ///
 /// Amber has exactly one meaning — unexplained — and appears nowhere else, so a
 /// day can be scanned for what still needs a reason.
+/// The colours everything is drawn in.
+///
+/// A facade over whichever `Palette` is selected, so views name a role — ground,
+/// ink, accent — and never a specific colour. Switching theme is then one stored
+/// string rather than an edit everywhere.
+///
+/// Semantic colours are deliberately *not* part of the palette: green means live
+/// and amber means wants-attention in every theme, because a meaning that changes
+/// with the theme is not a meaning.
 enum Journal {
-    /// Builds a colour that resolves per appearance, so light and dark are two
-    /// deliberate palettes rather than one inverted.
-    private static func adaptive(light: String, dark: String) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return NSColor(hex: isDark ? dark : light)
-        })
-    }
+    private static var palette: Palette { Palette.current }
 
-    // Dark is warmer and browner than a system dark grey — closer to lamplight on
-    // paper than to a terminal. Measured against the light values so the two
-    // themes read as the same product rather than one inverted.
-    static let paper      = adaptive(light: "F7F5EE", dark: "1E1A14")
-    static let paperDeep  = adaptive(light: "F1EEE4", dark: "16130E")
-    static let card       = adaptive(light: "FDFCF8", dark: "272219")
+    static var paper: Color { Palette.adaptive(light: palette.paperLight, dark: palette.paperDark) }
+    static var paperDeep: Color { Palette.adaptive(light: palette.deepLight, dark: palette.deepDark) }
+    static var card: Color { Palette.adaptive(light: palette.cardLight, dark: palette.cardDark) }
 
-    static let ink        = adaptive(light: "2A2520", dark: "F2EDE0")
-    static let inkMid     = adaptive(light: "6B6355", dark: "B3A994")
-    static let inkSoft    = adaptive(light: "918876", dark: "8A806C")
+    static var ink: Color { Palette.adaptive(light: palette.inkLight, dark: palette.inkDark) }
+    static var inkMid: Color { Palette.adaptive(light: palette.inkMidLight, dark: palette.inkMidDark) }
+    static var inkSoft: Color { Palette.adaptive(light: palette.inkSoftLight, dark: palette.inkSoftDark) }
 
-    static let rule       = adaptive(light: "E3DDCF", dark: "342E23")
-    static let ruleFirm   = adaptive(light: "CFC7B4", dark: "4E4634")
+    static var rule: Color { Palette.adaptive(light: palette.ruleLight, dark: palette.ruleDark) }
+    static var ruleFirm: Color { Palette.adaptive(light: palette.ruleFirmLight, dark: palette.ruleFirmDark) }
 
-    static let pen        = adaptive(light: "33587D", dark: "8FB6DA")
-    static let penSoft    = adaptive(light: "E4EBF2", dark: "1B2530")
+    /// The one colour a theme gets to choose the character of.
+    static var pen: Color { Palette.adaptive(light: palette.accentLight, dark: palette.accentDark) }
+    static var penSoft: Color { Palette.adaptive(light: palette.accentSoftLight, dark: palette.accentSoftDark) }
 
-    /// Unexplained. Nothing else is ever this colour.
-    static let amber      = adaptive(light: "A8752E", dark: "E0AC61")
-    static let amberSoft  = adaptive(light: "F6EBD8", dark: "33280F")
+    /// Wants attention. The same in every theme, and used for one thing only.
+    static let amber = Palette.adaptive(light: "A8752E", dark: "E0AC61")
+    static let amberSoft = Palette.adaptive(light: "F6EBD8", dark: "33280F")
+    /// Alive right now.
+    static let live = Palette.adaptive(light: "2C7A4B", dark: "5FBF85")
 
     enum Space {
         static let xs: CGFloat = 4

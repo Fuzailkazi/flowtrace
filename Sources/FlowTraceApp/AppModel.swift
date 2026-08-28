@@ -163,6 +163,18 @@ final class AppModel {
     /// is already running.
     var triggerReloadToken = 0
 
+    /// Bumped when the palette changes. Colours are read while a view's body runs,
+    /// so something observable has to change for them to be read again.
+    var paletteRevision = 0
+
+    var palette: Palette {
+        get { Palette.current }
+        set {
+            newValue.select()
+            paletteRevision += 1
+        }
+    }
+
     func reregisterTrigger() { triggerReloadToken += 1 }
 
     /// The chord to use if the user switches back from a modifier tap, so the

@@ -19,6 +19,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                appearanceSection
                 shortcutSection
                 browsersSection
                 alwaysOnSection
@@ -126,6 +127,66 @@ struct SettingsView: View {
             }
         }
         .opacity(adapter.isAvailable ? 1 : 0.55)
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            SectionHeader(title: "Appearance", subtitle: "follows your system light or dark setting")
+            Card {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    ForEach(Palette.all) { palette in
+                        Button {
+                            model.palette = palette
+                        } label: {
+                            HStack(spacing: Theme.Space.m) {
+                                swatch(palette)
+
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(palette.name)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text(palette.blurb)
+                                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                if palette.id == model.palette.id {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Divider()
+                    Text("Green means running and amber means it wants you, in every "
+                         + "theme — a meaning that changed with the theme wouldn't be one.")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// Ground, ink and accent — enough to judge a theme without applying it.
+    private func swatch(_ palette: Palette) -> some View {
+        HStack(spacing: 0) {
+            palette.previewGround.frame(width: 22)
+            palette.previewInk.frame(width: 11)
+            palette.previewAccent.frame(width: 11)
+        }
+        .frame(height: 26)
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Browsers
