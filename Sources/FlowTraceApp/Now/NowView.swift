@@ -48,10 +48,11 @@ struct NowView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: Journal.Space.s) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center, spacing: Journal.Space.m) {
                 Text("Right now")
                     .font(.journalTitle(25))
                     .foregroundStyle(Journal.ink)
+                SurfaceSwitch(model: model)
                 Spacer()
                 Text(state.capturedAt, format: .dateTime.hour().minute())
                     .font(.observed(12)).monospacedDigit()

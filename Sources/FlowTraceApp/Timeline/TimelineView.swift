@@ -86,10 +86,12 @@ struct TimelineView: View {
 
     private var dayHeader: some View {
         VStack(alignment: .leading, spacing: Journal.Space.s) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .center, spacing: Journal.Space.m) {
                 Text(isToday ? "Today" : day.formatted(.dateTime.weekday(.wide)))
                     .font(.journalTitle(25))
                     .foregroundStyle(Journal.ink)
+
+                SurfaceSwitch(model: model)
 
                 Spacer()
 

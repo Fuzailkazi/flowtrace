@@ -241,18 +241,6 @@ struct MainWindow: View {
     @ToolbarContentBuilder
     private var chrome: some ToolbarContent {
         ToolbarItemGroup {
-            Picker("", selection: Binding(
-                get: { model.route == .timeline ? 1 : 0 },
-                set: { model.route = $0 == 1 ? .timeline : .now }
-            )) {
-                Text("Now").tag(0)
-                Text("Today").tag(1)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 150)
-            .disabled(model.route != .now && model.route != .timeline)
-
             Spacer()
 
             Menu {
