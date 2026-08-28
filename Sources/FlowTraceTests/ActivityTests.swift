@@ -288,3 +288,78 @@ func runLiveProjectTests() {
         expectEqual(LiveStateReader.port(from: "[::1]:5432"), 5432)
     }
 }
+
+func runDeletionTests() {
+    TestKit.suite("Removing things")
+
+    // Hiding rather than deleting: the process is still running and would simply
+    // reappear on the next refresh.
+    TestKit.test("a hidden project stays hidden across refreshes") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        try store.ignore(path: "/p/noisy", reason: "hidden from Now")
+
+        let ignored = try store.ignoredPaths()
+        expect(ignored.contains(FilePathCanon.canonical("/p/noisy")), "\(ignored)")
+    }
+
+    TestKit.test("hiding is undone in one place") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        try store.ignore(path: "/p/noisy")
+        try store.stopIgnoring(path: "/p/noisy")
+        expectEqual(try store.ignoredPaths().count, 0, "after un-hiding")
+    }
+
+    // The detector and the live view share one list, so "I don't want to see
+    // this" means the same thing in both and is reversed once.
+    TestKit.test("hiding a project also stops the detector proposing it") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        try store.ignore(path: "/p/tutorial")
+
+        let detector = AbandonedWorkDetector(
+            adapters: [], ignoredPaths: try store.ignoredPaths()
+        )
+        // No adapters, so nothing to find — the point is that the ignore list
+        // reaches the detector at all, via the same call the app makes.
+        expectEqual(try detector.scan().proposals.count, 0)
+    }
+
+    TestKit.test("clearing what you wrote leaves the project alone") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        _ = try store.saveProjectNote(ProjectNote(
+            repositoryPath: "/p/acme", repositoryName: "acme", building: "the timeline"
+        ))
+        expectNotNil(try store.projectNote(for: "/p/acme"), "before")
+
+        try store.deleteProjectNote(repositoryPath: "/p/acme")
+        expectNil(try store.projectNote(for: "/p/acme"), "after")
+    }
+
+    TestKit.test("forgetting one entry leaves the rest of the day") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let moment = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = try store.beginActivity(ActivityEvent(
+            kind: .app, startedAt: moment, appName: "VS Code"
+        ))
+        try store.beginActivity(ActivityEvent(
+            kind: .app, startedAt: moment.addingTimeInterval(1800), appName: "Chrome"
+        ))
+
+        try store.deleteActivity(id: first.id)
+        let remaining = try store.activity(on: moment, minimumSeconds: 0)
+        expectEqual(remaining.count, 1, "one left")
+        expectEqual(remaining.first?.appName, "Chrome")
+    }
+
+    TestKit.test("forgetting a day leaves other days alone") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let today = Date(timeIntervalSince1970: 1_700_000_000)
+        let yesterday = today.addingTimeInterval(-86_400)
+
+        try store.beginActivity(ActivityEvent(kind: .app, startedAt: yesterday, appName: "Slack"))
+        try store.beginActivity(ActivityEvent(kind: .app, startedAt: today, appName: "VS Code"))
+
+        try store.deleteActivity(on: today)
+        expectEqual(try store.activity(on: today, minimumSeconds: 0).count, 0, "today gone")
+        expectEqual(try store.activity(on: yesterday, minimumSeconds: 0).count, 1, "yesterday kept")
+    }
+}

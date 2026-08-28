@@ -189,3 +189,17 @@ extension Store {
         }
     }
 }
+
+extension Store {
+    /// Hides a repository everywhere it would otherwise be surfaced.
+    ///
+    /// One list for both the detector and the live view, so "I don't want to see
+    /// this" means the same thing in both places and is undone in one place.
+    public func ignore(path: String, reason: String = "") throws {
+        try database.writer.write { db in
+            try IgnoredPath(
+                path: FilePathCanon.canonical(path), reason: reason
+            ).save(db)
+        }
+    }
+}

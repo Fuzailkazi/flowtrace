@@ -17,6 +17,7 @@ runBriefTests()
 runActivityTests()
 runSessionImportTests()
 runLiveProjectTests()
+runDeletionTests()
 
 
 TestKit.summarize()

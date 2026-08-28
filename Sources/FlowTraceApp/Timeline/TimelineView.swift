@@ -13,6 +13,7 @@ struct TimelineView: View {
     @State private var refreshTick = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
     /// Highlighted after being picked in the rail.
     @State private var selected: String?
+    @State private var confirmingForget = false
 
     private var unexplained: Int { events.filter(\.isUnexplained).count }
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
@@ -79,6 +80,21 @@ struct TimelineView: View {
             }
         }
         .toolbar { toolbar }
+        .confirmationDialog(
+            "Forget everything recorded on this day?",
+            isPresented: $confirmingForget,
+            titleVisibility: .visible
+        ) {
+            Button("Forget it", role: .destructive) {
+                try? model.store.deleteActivity(on: day)
+                load()
+                model.toast = Toast(message: "That day is gone")
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("Every entry and everything you wrote about them is removed. "
+                 + "Your own files are untouched.")
+        }
         }
     }
 
@@ -161,6 +177,14 @@ struct TimelineView: View {
 
             Button("Today") { day = Calendar.current.startOfDay(for: Date()) }
                 .disabled(isToday)
+
+            Menu {
+                Button("Forget this day", role: .destructive) { confirmingForget = true }
+                    .disabled(events.isEmpty)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuIndicator(.hidden)
         }
     }
 

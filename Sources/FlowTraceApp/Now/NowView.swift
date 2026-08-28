@@ -15,6 +15,8 @@ struct NowView: View {
     @State private var editing: String?
     @State private var draft = ""
     @State private var loading = true
+    @State private var hovering: String?
+    @State private var ignored: Set<String> = []
     @FocusState private var focused: Bool
 
     private let tick = Timer.publish(every: 8, on: .main, in: .common).autoconnect()
@@ -103,6 +105,23 @@ struct NowView: View {
 
                 Spacer(minLength: Journal.Space.s)
 
+                if hovering == project.path {
+                    Menu {
+                        if project.note != nil {
+                            Button("Clear what I wrote") { clearNote(project) }
+                        }
+                        Button("Hide this project") { hide(project) }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Journal.inkSoft)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Hide this project, or clear its note")
+                }
+
                 Text(project.statusLabel)
                     .font(.observed(11))
                     .foregroundStyle(project.isForgotten ? Journal.amber : Journal.inkSoft)
@@ -143,6 +162,7 @@ struct NowView: View {
         }
         .padding(.vertical, Journal.Space.m)
         .overlay(alignment: .bottom) { Divider().overlay(Journal.rule) }
+        .onHover { hovering = $0 ? project.path : (hovering == project.path ? nil : hovering) }
         .contextMenu {
             Button("Open in Finder") {
                 NSWorkspace.shared.open(URL(fileURLWithPath: project.path))
@@ -151,6 +171,11 @@ struct NowView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(project.path, forType: .string)
             }
+            Divider()
+            if project.note != nil {
+                Button("Clear what I wrote") { clearNote(project) }
+            }
+            Button("Hide this project", role: .destructive) { hide(project) }
         }
     }
 
@@ -225,6 +250,26 @@ struct NowView: View {
         return Journal.ruleFirm
     }
 
+    /// Hiding rather than deleting, because the process is still running and
+    /// would simply reappear. Reuses the same ignore list the detector uses, so
+    /// there is one place to undo it: Settings → Sources.
+    private func hide(_ project: LiveProject) {
+        do {
+            try model.store.ignore(path: project.path, reason: "hidden from Now")
+            ignored.insert(FilePathCanon.canonical(project.path))
+            projects = state.projects(notes: notes).filter { !ignored.contains($0.path) }
+            model.toast = Toast(message: "Hiding \(project.name) — undo in Settings")
+        } catch {
+            model.toast = Toast(message: error.localizedDescription, isError: true)
+        }
+    }
+
+    private func clearNote(_ project: LiveProject) {
+        try? model.store.deleteProjectNote(repositoryPath: project.path)
+        notes.removeValue(forKey: FilePathCanon.canonical(project.path))
+        projects = state.projects(notes: notes).filter { !ignored.contains($0.path) }
+    }
+
     private func begin(path: String, existing: String) {
         editing = FilePathCanon.canonical(path)
         draft = existing
@@ -237,7 +282,7 @@ struct NowView: View {
         note.building = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if let saved = try? model.store.saveProjectNote(note) {
             notes[canonical] = saved
-            projects = state.projects(notes: notes)
+            projects = state.projects(notes: notes).filter { !ignored.contains($0.path) }
         }
         editing = nil
     }
@@ -246,12 +291,17 @@ struct NowView: View {
     private func refresh() async {
         let store = model.store
         let read = await Task.detached(priority: .userInitiated) {
-            (LiveStateReader().read(), (try? store.allProjectNotes()) ?? [])
+            (
+                LiveStateReader().read(),
+                (try? store.allProjectNotes()) ?? [],
+                (try? store.ignoredPaths()) ?? []
+            )
         }.value
 
         state = read.0
         notes = Dictionary(uniqueKeysWithValues: read.1.map { ($0.repositoryPath, $0) })
-        projects = read.0.projects(notes: notes)
+        ignored = read.2
+        projects = read.0.projects(notes: notes).filter { !ignored.contains($0.path) }
         loading = false
     }
 }

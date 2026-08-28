@@ -70,6 +70,18 @@ struct TimelineRow: View {
 
             Spacer(minLength: Journal.Space.s)
 
+            if isHovering {
+                Button(action: onDelete) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Journal.inkSoft)
+                        .padding(3)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Forget this")
+            }
+
             Text(event.durationLabel)
                 .font(.observed(11))
                 .foregroundStyle(Journal.inkSoft)
