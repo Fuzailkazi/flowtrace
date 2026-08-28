@@ -23,8 +23,8 @@ func runActivityTests() {
         for minute in 0..<10 {
             try store.beginActivity(event("VS Code", target: "flowtrace", at: minute))
         }
-        let day = try store.activity(on: Date(timeIntervalSince1970: 1_700_000_000),
-                                    minimumSeconds: 0)
+        let day = try store.allActivity(on: Date(timeIntervalSince1970: 1_700_000_000),
+                                       minimumSeconds: 0)
         expectEqual(day.count, 1, "spans")
         expectEqual(day.first?.appName, "VS Code")
     }
@@ -34,8 +34,8 @@ func runActivityTests() {
         try store.beginActivity(event("VS Code", target: "flowtrace", at: 0))
         try store.beginActivity(event("Chrome", target: "pencil.com", at: 30))
 
-        let day = try store.activity(on: Date(timeIntervalSince1970: 1_700_000_000),
-                                     minimumSeconds: 0)
+        let day = try store.allActivity(on: Date(timeIntervalSince1970: 1_700_000_000),
+                                        minimumSeconds: 0)
         expectEqual(day.count, 2, "spans")
         let first = try unwrap(day.first)
         expectNotNil(first.endedAt, "first span should be closed")
@@ -50,8 +50,8 @@ func runActivityTests() {
         try store.beginActivity(event("Slack", at: 10))
         try store.beginActivity(event("VS Code", target: "flowtrace", at: 12))
 
-        let day = try store.activity(on: Date(timeIntervalSince1970: 1_700_000_000),
-                                     minimumSeconds: 0)
+        let day = try store.allActivity(on: Date(timeIntervalSince1970: 1_700_000_000),
+                                        minimumSeconds: 0)
         let vsCode = day.filter { $0.appName == "VS Code" }
         expectEqual(vsCode.count, 1, "VS Code should appear once")
         expect(try unwrap(vsCode.first).isOpen, "and be the open span again")
@@ -62,8 +62,8 @@ func runActivityTests() {
         try store.beginActivity(event("Chrome", target: "pencil.com", at: 0, kind: .browserTab))
         try store.beginActivity(event("Chrome", target: "stripe.com", at: 5, kind: .browserTab))
 
-        let day = try store.activity(on: Date(timeIntervalSince1970: 1_700_000_000),
-                                     minimumSeconds: 0)
+        let day = try store.allActivity(on: Date(timeIntervalSince1970: 1_700_000_000),
+                                        minimumSeconds: 0)
         expectEqual(day.count, 2, "different pages are different entries")
     }
 
@@ -75,8 +75,8 @@ func runActivityTests() {
         try store.beginActivity(event("VS Code", target: "flowtrace", at: 1))
 
         // Finder got 60 seconds; with a 5-minute floor it shouldn't be listed.
-        let filtered = try store.activity(on: Date(timeIntervalSince1970: 1_700_000_000),
-                                          minimumSeconds: 300)
+        let filtered = try store.allActivity(on: Date(timeIntervalSince1970: 1_700_000_000),
+                                             minimumSeconds: 300)
         expect(!filtered.contains { $0.appName == "Finder" }, "brief glances are dropped")
     }
 
@@ -87,8 +87,8 @@ func runActivityTests() {
         try store.beginActivity(event("VS Code", at: 1))
         _ = try store.annotate(activityId: brief.id, note: "grabbing the logo file")
 
-        let filtered = try store.activity(on: Date(timeIntervalSince1970: 1_700_000_000),
-                                          minimumSeconds: 300)
+        let filtered = try store.allActivity(on: Date(timeIntervalSince1970: 1_700_000_000),
+                                             minimumSeconds: 300)
         expect(filtered.contains { $0.appName == "Finder" }, "an annotated glance is kept")
     }
 
@@ -98,10 +98,14 @@ func runActivityTests() {
         try store.beginActivity(event("Chrome", target: "pencil.com", at: 30))
 
         let day = Date(timeIntervalSince1970: 1_700_000_000)
-        expectEqual(try store.activity(on: day, minimumSeconds: 0).filter(\.isUnexplained).count, 2)
+        expectEqual(
+            try store.allActivity(on: day, minimumSeconds: 0).filter(\.isUnexplained).count, 2
+        )
 
         _ = try store.annotate(activityId: a.id, note: "rebuilding the capture layer")
-        expectEqual(try store.activity(on: day, minimumSeconds: 0).filter(\.isUnexplained).count, 1)
+        expectEqual(
+            try store.allActivity(on: day, minimumSeconds: 0).filter(\.isUnexplained).count, 1
+        )
     }
 
     TestKit.test("an empty note clears the reason rather than storing blankness") {
@@ -120,9 +124,11 @@ func runActivityTests() {
         try store.beginActivity(event("Chrome", at: 30))
 
         let day = Date(timeIntervalSince1970: 1_700_000_000)
-        expect(try store.activity(on: day, minimumSeconds: 0).count > 0)
+        expect(try store.allActivity(on: day, minimumSeconds: 0).count > 0)
         try store.deleteActivity(on: day)
-        expectEqual(try store.activity(on: day, minimumSeconds: 0).count, 0, "after forgetting")
+        expectEqual(
+            try store.allActivity(on: day, minimumSeconds: 0).count, 0, "after forgetting"
+        )
     }
 
     TestKit.test("durations read the way people say them") {
@@ -186,7 +192,7 @@ func runSessionImportTests() {
         _ = try store.upsertImportedActivity(session(about: "First title"))
         _ = try store.upsertImportedActivity(session(about: "Revised title"))
 
-        let day = try store.activity(on: moment, minimumSeconds: 0)
+        let day = try store.allActivity(on: moment, minimumSeconds: 0)
         expectEqual(day.count, 1, "one session, imported twice")
         expectEqual(day.first?.metadata["about"], "Revised title", "latest wins")
     }
@@ -345,7 +351,7 @@ func runDeletionTests() {
         ))
 
         try store.deleteActivity(id: first.id)
-        let remaining = try store.activity(on: moment, minimumSeconds: 0)
+        let remaining = try store.allActivity(on: moment, minimumSeconds: 0)
         expectEqual(remaining.count, 1, "one left")
         expectEqual(remaining.first?.appName, "Chrome")
     }
@@ -359,7 +365,86 @@ func runDeletionTests() {
         try store.beginActivity(ActivityEvent(kind: .app, startedAt: today, appName: "VS Code"))
 
         try store.deleteActivity(on: today)
-        expectEqual(try store.activity(on: today, minimumSeconds: 0).count, 0, "today gone")
-        expectEqual(try store.activity(on: yesterday, minimumSeconds: 0).count, 1, "yesterday kept")
+        expectEqual(try store.allActivity(on: today, minimumSeconds: 0).count, 0, "today gone")
+        expectEqual(
+            try store.allActivity(on: yesterday, minimumSeconds: 0).count, 1, "yesterday kept"
+        )
+    }
+}
+
+
+func runWrittenOnlyTests() {
+    TestKit.suite("The timeline is what you wrote")
+
+    func store() throws -> Store { try Store(database: FlowTraceDatabase.inMemory()) }
+    let moment = Date(timeIntervalSince1970: 1_700_000_000)
+
+    func event(_ app: String, at minutes: Int) -> ActivityEvent {
+        ActivityEvent(
+            kind: .app,
+            startedAt: moment.addingTimeInterval(Double(minutes) * 60),
+            appName: app
+        )
+    }
+
+    // Ambient capture produced 24 entries in a day of which 2 said anything —
+    // "Code" seven times over, indistinguishable and worth nothing to read.
+    TestKit.test("ambient events don't earn a line; written ones do") {
+        let store = try store()
+        let noted = try store.beginActivity(event("VS Code", at: 0))
+        try store.beginActivity(event("Chrome", at: 30))
+        try store.beginActivity(event("Slack", at: 60))
+        _ = try store.annotate(activityId: noted.id, note: "rebuilding the capture layer")
+
+        let written = try store.activity(on: moment, minimumSeconds: 0)
+        expectEqual(written.count, 1, "only what was written")
+        expectEqual(written.first?.note, "rebuilding the capture layer")
+    }
+
+    TestKit.test("the raw record is still there when asked for") {
+        let store = try store()
+        try store.beginActivity(event("VS Code", at: 0))
+        try store.beginActivity(event("Chrome", at: 30))
+
+        expectEqual(try store.activity(on: moment, minimumSeconds: 0).count, 0, "written")
+        expectEqual(
+            try store.allActivity(on: moment, minimumSeconds: 0).count, 2, "raw"
+        )
+    }
+
+    // Ambient rows exist to give the capture panel something to say about what
+    // led here; past a couple of days they are only taking up space.
+    TestKit.test("old ambient rows are pruned, written ones never are") {
+        let store = try store()
+        let old = Date().addingTimeInterval(-5 * 86_400)
+
+        let keep = try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: old, endedAt: old, appName: "VS Code",
+            note: "the thing I was building"
+        ))
+        _ = try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: old, endedAt: old, appName: "Slack"
+        ))
+
+        let removed = try store.pruneAmbientActivity(olderThan: 2)
+        expectEqual(removed, 1, "only the unwritten one")
+
+        let survivors = try store.allActivity(on: old, minimumSeconds: 0)
+        expectEqual(survivors.count, 1)
+        expectEqual(survivors.first?.id, keep.id, "what you wrote survives")
+    }
+
+    TestKit.test("an imported session is never pruned") {
+        let store = try store()
+        let old = Date().addingTimeInterval(-9 * 86_400)
+        var session = ActivityEvent(
+            kind: .agentSession, startedAt: old, appName: "Claude Code",
+            externalId: "claude-code:old"
+        )
+        session.endedAt = old
+        _ = try store.upsertImportedActivity(session)
+
+        _ = try store.pruneAmbientActivity(olderThan: 2)
+        expectEqual(try store.allActivity(on: old, minimumSeconds: 0).count, 1, "kept")
     }
 }

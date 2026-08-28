@@ -81,8 +81,30 @@ extension Store {
         return event
     }
 
-    /// One day, oldest first — the timeline's only query.
-    public func activity(on day: Date, minimumSeconds: TimeInterval = 20) throws -> [ActivityEvent] {
+    /// One day of things *you wrote* — the timeline's only query.
+    ///
+    /// Ambient capture is still recorded, but it is context, not content. Left to
+    /// fill the timeline it produced 24 entries in a day of which 2 said anything:
+    /// "Code" seven times over, "Brave Browser" five, indistinguishable from each
+    /// other and worth nothing to read. What earns a line is a sentence you chose
+    /// to write.
+    ///
+    /// Pass `includingAmbient` to see the raw record underneath.
+    public func activity(
+        on day: Date,
+        minimumSeconds: TimeInterval = 20,
+        includingAmbient: Bool = false
+    ) throws -> [ActivityEvent] {
+        let all = try allActivity(on: day, minimumSeconds: minimumSeconds)
+        guard !includingAmbient else { return all }
+        return all.filter { !$0.isUnexplained }
+    }
+
+    /// Everything recorded on a day, annotated or not. Used for the "just before
+    /// this" context in the capture panel, and by the raw view.
+    public func allActivity(
+        on day: Date, minimumSeconds: TimeInterval = 20
+    ) throws -> [ActivityEvent] {
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: day)
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return [] }
@@ -128,8 +150,19 @@ extension Store {
         }
     }
 
-    public func unexplainedCount(on day: Date) throws -> Int {
-        try activity(on: day).filter(\.isUnexplained).count
+    /// Ambient events are only useful while they are recent — they exist to give
+    /// the capture panel something to say about what led here. Anything older,
+    /// and unwritten-on, is noise taking up space.
+    @discardableResult
+    public func pruneAmbientActivity(olderThan days: Int = 2) throws -> Int {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        return try database.writer.write { db in
+            try ActivityEvent
+                .filter(ActivityEvent.Columns.startedAt < cutoff)
+                .filter(ActivityEvent.Columns.note == nil)
+                .filter(ActivityEvent.Columns.kind != ActivityKind.agentSession.rawValue)
+                .deleteAll(db)
+        }
     }
 
     public func deleteActivity(id: String) throws {

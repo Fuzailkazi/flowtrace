@@ -132,6 +132,13 @@ final class AppModel {
     func startRecordingIfEnabled() {
         if isRecording { recorder.start() }
         importSessions()
+
+        // Ambient events exist to give the capture panel something to say about
+        // what led here. Past a couple of days they are only taking up space.
+        let store = self.store
+        Task.detached(priority: .background) {
+            _ = try? store.pruneAmbientActivity()
+        }
     }
 
     /// Bumped whenever the day changes, so the timeline and the rail refresh

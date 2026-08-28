@@ -15,7 +15,6 @@ struct TimelineView: View {
     @State private var selected: String?
     @State private var confirmingForget = false
 
-    private var unexplained: Int { events.filter(\.isUnexplained).count }
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
     var body: some View {
@@ -116,16 +115,8 @@ struct TimelineView: View {
                     .foregroundStyle(Journal.inkSoft)
             }
 
-            // The one number that says whether the day is accounted for.
-            if unexplained > 0 {
-                HStack(spacing: 6) {
-                    Circle().fill(Journal.amber).frame(width: 6, height: 6)
-                    Text("\(unexplained) thing\(unexplained == 1 ? "" : "s") you haven't explained")
-                        .font(.observed(12))
-                        .foregroundStyle(Journal.amber)
-                }
-            } else if !events.isEmpty {
-                Text("Every entry has a reason.")
+            if !events.isEmpty {
+                Text("\(events.count) note\(events.count == 1 ? "" : "s")")
                     .font(.observed(12))
                     .foregroundStyle(Journal.inkSoft)
             }
@@ -138,20 +129,20 @@ struct TimelineView: View {
     @ViewBuilder
     private var empty: some View {
         VStack(alignment: .leading, spacing: Journal.Space.m) {
-            Text(isToday ? "Nothing written down yet." : "Nothing on this day.")
+            Text(isToday ? "Nothing written down yet." : "Nothing written on this day.")
                 .font(.journalTitle(19))
                 .foregroundStyle(Journal.ink)
                 .padding(.top, Journal.Space.xl)
 
-            Text(model.isRecording
-                 ? "FlowTrace is watching. Switch to another app and it will appear here."
-                 : "Turn on recording in Settings and your day will fill in as you work.")
+            Text("Press \(model.captureTrigger.displayString) wherever you are and write "
+                 + "why you're there. That's what appears here — the things you chose to "
+                 + "write down, not everything you touched.")
                 .font(.observed(13.5))
                 .foregroundStyle(Journal.inkMid)
-                .frame(maxWidth: 420, alignment: .leading)
+                .frame(maxWidth: 440, alignment: .leading)
 
-            if !model.isRecording {
-                Button("Open Settings") { model.route = .settings }
+            if !CaptureTrigger.hasBeenChosen {
+                Button("Pick a key") { model.route = .settings }
                     .controlSize(.small)
                     .padding(.top, Journal.Space.xs)
             }

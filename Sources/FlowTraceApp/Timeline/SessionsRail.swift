@@ -165,7 +165,9 @@ struct SessionsRail: View {
     // MARK: - Data
 
     private func load() {
-        let events = ((try? model.store.activity(on: day, minimumSeconds: 0)) ?? [])
+        // The rail wants sessions whether or not you wrote about them, so it asks
+        // for the raw record rather than the written-only timeline.
+        let events = ((try? model.store.allActivity(on: day, minimumSeconds: 0)) ?? [])
             .filter { $0.kind == .agentSession }
 
         let byRepo = Dictionary(grouping: events) { $0.target ?? "elsewhere" }

@@ -42,10 +42,26 @@ struct QuickCaptureView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Right now")
-                .font(.observed(10.5, weight: .semibold))
-                .tracking(1.3)
-                .foregroundStyle(Journal.pen)
+            HStack(alignment: .top) {
+                Text("Right now")
+                    .font(.observed(10.5, weight: .semibold))
+                    .tracking(1.3)
+                    .foregroundStyle(Journal.pen)
+
+                Spacer()
+
+                // Escape works, but a panel with no visible way out reads as a
+                // thing that has taken over rather than one you summoned.
+                Button(action: onFinish) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Journal.inkSoft)
+                        .padding(4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close without writing anything (esc)")
+            }
 
             Text(resolved.summary)
                 .font(.journalTitle(22))
