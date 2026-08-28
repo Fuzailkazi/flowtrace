@@ -12,7 +12,12 @@ final class QuickCapturePanel: NSPanel {
     init(content: NSView) {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 200),
-            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
+            // Deliberately *not* .nonactivatingPanel. That flag stops the panel
+            // becoming key even when the app is activated, which showed up in the
+            // log as "key: false" — the panel appeared and then silently refused
+            // every keystroke. Focus is handed back to the previous app on close,
+            // which gets the same result without the flag.
+            styleMask: [.titled, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -95,9 +100,18 @@ final class QuickCaptureController {
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
 
-        Diagnostics.log(
-            "panel shown over \(snapshot.appName) — key: \(panel.isKeyWindow)"
-        )
+        // Key status is not settled synchronously, so a reading taken here is
+        // meaningless. Check on the next pass and insist if it didn't take.
+        DispatchQueue.main.async { [weak self] in
+            guard let panel = self?.panel else { return }
+            if !panel.isKeyWindow {
+                NSApp.activate(ignoringOtherApps: true)
+                panel.makeKey()
+            }
+            Diagnostics.log(
+                "panel over \(snapshot.appName) — accepts typing: \(panel.isKeyWindow)"
+            )
+        }
     }
 
     func dismiss(returningTo app: NSRunningApplication? = nil) {

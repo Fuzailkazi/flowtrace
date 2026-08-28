@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var ignored: [String] = []
     @State private var accessibilityGranted = AccessibilityPermission.isGranted
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var browsers: [BrowserAccess.BrowserState] = []
     /// The permission is granted in System Settings, outside this app, so poll
     /// while the pane is open rather than making the user relaunch.
     private let permissionTick = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
@@ -18,6 +19,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
                 shortcutSection
+                browsersSection
                 alwaysOnSection
                 recordingSection
                 sources
@@ -29,7 +31,10 @@ struct SettingsView: View {
             .padding(Theme.Space.xl)
         }
         .navigationTitle("Settings")
-        .task { reload() }
+        .task {
+            reload()
+            browsers = BrowserAccess.survey()
+        }
         .onReceive(permissionTick) { _ in
             let granted = AccessibilityPermission.isGranted
             guard granted != accessibilityGranted else { return }
@@ -119,6 +124,93 @@ struct SettingsView: View {
             }
         }
         .opacity(adapter.isAvailable ? 1 : 0.55)
+    }
+
+    // MARK: - Browsers
+
+    /// Connecting each browser explicitly, because macOS only ever prompts once.
+    ///
+    /// If that single prompt was dismissed, the browser is refused forever with
+    /// no further prompt — which showed up as FlowTrace naming the app instead of
+    /// the page, with nothing to explain why.
+    private var browsersSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            SectionHeader(
+                title: "Browsers",
+                subtitle: "so notes land on the page, not the app"
+            )
+            Card {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    if browsers.isEmpty {
+                        Text("No supported browser found.")
+                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+
+                    ForEach(browsers) { state in
+                        HStack(spacing: Theme.Space.s) {
+                            Image(systemName: icon(for: state.status))
+                                .font(.system(size: 11))
+                                .foregroundStyle(colour(for: state.status))
+                                .frame(width: 14)
+
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(state.browser.name)
+                                    .font(.system(size: 12, weight: .medium))
+                                Text(state.explanation)
+                                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            switch state.status {
+                            case .notAsked:
+                                Button("Connect") {
+                                    _ = BrowserAccess.connect(state.browser)
+                                    browsers = BrowserAccess.survey()
+                                }
+                                .controlSize(.small)
+                            case .denied:
+                                Button("Open Settings") {
+                                    AutomationPermission.openSettings()
+                                }
+                                .controlSize(.small)
+                            case .connected, .notRunning:
+                                EmptyView()
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    Divider()
+                    HStack {
+                        Text("Only the tab's title and address are read — never the page.")
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                        Spacer()
+                        Button("Re-check") { browsers = BrowserAccess.survey() }
+                            .buttonStyle(.link).font(.system(size: 11))
+                    }
+                }
+            }
+        }
+    }
+
+    private func icon(for status: BrowserAccess.Status) -> String {
+        switch status {
+        case .connected: "checkmark.circle.fill"
+        case .denied: "exclamationmark.triangle.fill"
+        case .notAsked: "lock.fill"
+        case .notRunning: "moon.zzz"
+        }
+    }
+
+    private func colour(for status: BrowserAccess.Status) -> Color {
+        switch status {
+        case .connected: .green
+        case .denied: .orange
+        case .notAsked: .secondary
+        case .notRunning: Color.secondary.opacity(0.5)
+        }
     }
 
     // MARK: - Always on
