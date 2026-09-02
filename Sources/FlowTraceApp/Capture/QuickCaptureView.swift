@@ -126,11 +126,18 @@ struct QuickCaptureView: View {
                 .foregroundStyle(Journal.ink)
                 .focused($focused)
                 .onSubmit(save)
+                .onKeyPress(.tab) {
+                    guard canAcceptSuggestion else { return .ignored }
+                    acceptSuggestion()
+                    return .handled
+                }
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(Journal.paper, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8).strokeBorder(Journal.pen, lineWidth: 1)
                 )
+
+            suggestionRow
 
             HStack(spacing: Journal.Space.s) {
                 Text("⏎ save").font(.observed(10.5)).foregroundStyle(Journal.inkSoft)
@@ -198,6 +205,50 @@ struct QuickCaptureView: View {
     }
 
     // MARK: - Smart capture
+
+    private var canAcceptSuggestion: Bool { note.isEmpty && suggestion != nil }
+
+    /// Fills the field and selects the text, so typing replaces it outright —
+    /// nothing is saved until Return is pressed. Reaching into the responder
+    /// chain is necessary because a plain SwiftUI `TextField` doesn't expose the
+    /// underlying `NSTextView` to select programmatically; the field already has
+    /// focus (this is only reachable while it's focused and empty), so its field
+    /// editor is the key window's first responder a moment after the text is set.
+    private func acceptSuggestion() {
+        guard let suggestion else { return }
+        note = suggestion.text
+        DispatchQueue.main.async {
+            (NSApp.keyWindow?.firstResponder as? NSTextView)?.selectAll(nil)
+        }
+    }
+
+    private func suggestionLabel(_ suggestion: CaptureSuggestion) -> String {
+        suggestion.source == .agentPrompt
+            ? "Last asked: \"\(suggestion.text)\""
+            : "\"\(suggestion.text)\""
+    }
+
+    @ViewBuilder
+    private var suggestionRow: some View {
+        if canAcceptSuggestion, let suggestion {
+            Button(action: acceptSuggestion) {
+                HStack(spacing: 6) {
+                    Text("💭")
+                    Text(suggestionLabel(suggestion))
+                        .font(.yourWords(12.5))
+                        .foregroundStyle(Journal.inkMid)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text("Tab to use")
+                        .font(.observed(10.5, weight: .medium))
+                        .foregroundStyle(Journal.inkSoft)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
 
     /// The currently-open activity's project, or — scanning newest-first — the
     /// first `leadingUp` event that has one. Stops at the first `cwd` found,
