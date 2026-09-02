@@ -67,12 +67,13 @@ user tell it's a suggestion versus their own words.
 Only the first source that produces a non-empty result is used — this is a
 single best-guess, not a set of competing options.
 
-1. **Project note** — if a recent agent-session activity event (the
-   currently-open activity, or the most recent one in `leadingUp`) carries
-   `metadata["cwd"]`, and a `ProjectNote` exists for that repository
-   (`store.projectNote(for:)` — the same "what you're building here" note
-   shown on the Now view), suggest its `building` text. Highest trust: it's
-   your own sentence about this exact project.
+1. **Project note** — check the currently-open activity first; if it has no
+   `metadata["cwd"]`, scan `leadingUp` newest-first for the first event that
+   does (same "scan for the first match" approach as source 3 below, not a
+   single fixed candidate). If a `cwd` is found and a `ProjectNote` exists
+   for that repository (`store.projectNote(for:)` — the same "what you're
+   building here" note shown on the Now view), suggest its `building` text.
+   Highest trust: it's your own sentence about this exact project.
 2. **Tab note** — if `resolved.url` is set and `store.noteForTab(url:)`
    returns a non-empty note, suggest it. Also your own words, about this
    exact page.
@@ -116,9 +117,12 @@ plan doesn't underestimate them):
 
 ### Architecture
 
-A new pure, deterministic, unit-testable type in `FlowTraceCore`, matching
-the shape of `DeterministicSummarizer` and `BriefBuilder` — no network, no
-inference beyond stored records, fully traceable to what's shown:
+A new pure, deterministic, unit-testable type in `FlowTraceCore` — no
+network, no inference beyond stored records, fully traceable to what's
+shown, the same behavioral rule `DeterministicSummarizer` and
+`BriefBuilder` already follow. As a stateless enum with a static entry
+point it follows `FlowTraceCore`'s existing convention for that shape
+(`Redaction`, `FilePathCanon`, `SearchIndex`):
 
 ```swift
 public struct CaptureSuggestionInput: Sendable {
@@ -171,9 +175,9 @@ Since this is a UI-facing capture flow, verify by hand in the running app
 - Open a repo with a saved project note, trigger Quick Capture from that
   app → suggestion appears, matches the note, Tab fills it.
 - Open a browser tab with a saved tab note → suggestion appears from the tab
-  note, not the project note (tab note doesn't apply here so this confirms
-  source selection, not priority — use a case with *both* available to
-  confirm project note wins).
+  note, not the project note (project note doesn't apply here so this
+  confirms source selection, not priority — use a case with *both*
+  available to confirm project note wins).
 - Trigger Quick Capture somewhere with no matching source → no suggestion
   row appears at all.
 - Start typing without accepting → row disappears; accepting then editing
