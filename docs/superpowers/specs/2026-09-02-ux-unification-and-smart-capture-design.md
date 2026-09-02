@@ -77,9 +77,12 @@ single best-guess, not a set of competing options.
    returns a non-empty note, suggest it. Also your own words, about this
    exact page.
 3. **Last agent prompt** — from `leadingUp`, the most recent event with a
-   non-empty `metadata["asked"]` or `.note`, condensed via
-   `AgentSession.condense`. Framed explicitly as "Last asked: …", never
-   presented as if it were a note you wrote — it's observed, not authored.
+   non-empty `metadata["asked"]`, condensed via `AgentSession.condense`.
+   Framed explicitly as "Last asked: …", never presented as if it were a
+   note you wrote — it's observed, not authored. (Deliberately excludes
+   `.note` on `leadingUp` events: that field is documented as "your own
+   words," so treating it as this source's input would contradict the
+   "observed, not authored" framing below.)
 
 If none of the three produce anything, no suggestion is shown. Silence is
 the correct default here, consistent with `BriefBuilder`'s existing rule
@@ -98,6 +101,18 @@ the correct default here, consistent with `BriefBuilder`'s existing rule
 - As soon as the field becomes non-empty by any means, the row disappears.
 - This mirrors the existing "Edit first" pattern on `ProposalCard` for
   detected work: suggest, never auto-commit.
+
+**Implementation notes** (flagged by spec review, not full designs, so the
+plan doesn't underestimate them):
+- A plain SwiftUI `TextField` treats Tab as focus-traversal, not text input —
+  intercepting it for accept-suggestion will likely need an
+  `onKeyPress`/`NSViewRepresentable`-level workaround rather than a bare
+  `.keyboardShortcut(.tab, ...)` button, since Tab needs to be captured only
+  while this field is focused and empty.
+- "Selects the suggested text so typing replaces it outright" is non-trivial
+  with a plain SwiftUI `TextField`; the likely path is bridging to the
+  underlying `NSTextField`'s selection (`currentEditor()` /
+  `NSTextView.selectedRange`) after setting the text.
 
 ### Architecture
 
@@ -123,10 +138,25 @@ public enum CaptureSuggester {
 }
 ```
 
-`QuickCaptureView.load()` gathers the three raw inputs (already-available
-store calls plus the existing `leadingUp` fetch — no new storage, no new git
-reads) and calls `CaptureSuggester.suggest`. The view stays thin; all
-priority/selection logic is testable independent of SwiftUI.
+**Timing:** `resolved.url` is `nil` at the moment `load()` runs —
+`FrontmostSnapshot.capture()` never sets `url`; only `resolvingBrowserTab()`
+does, and that runs in the detached `Task` `load()` kicks off, landing on
+`resolved` only after `load()` itself has returned. So the tab-note input
+isn't available yet on the first pass. Concretely:
+
+1. In `load()`: gather the project-note and last-agent-prompt inputs (both
+   available synchronously) and call `CaptureSuggester.suggest`. A
+   suggestion can already appear the instant the panel opens.
+2. Where `resolved` is updated after tab enrichment finishes (the existing
+   `if enriched != snapshot { resolved = enriched }` line): if `note` is
+   still empty, look up the tab note via `store.noteForTab(url:)` and call
+   `CaptureSuggester.suggest` again with all three inputs, replacing the
+   shown suggestion if this second pass produces one. If `note` is already
+   non-empty (the user started typing, or accepted the first suggestion),
+   skip the recompute — the row is already gone and should stay gone.
+
+The view stays thin; all priority/selection logic is testable independent
+of SwiftUI.
 
 ### Testing
 
