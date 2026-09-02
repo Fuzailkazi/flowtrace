@@ -15,6 +15,7 @@ struct QuickCaptureView: View {
     @State private var resolved: FrontmostSnapshot
     @State private var current: ActivityEvent?
     @State private var leadingUp: [ActivityEvent] = []
+    @State private var suggestion: CaptureSuggestion?
     @State private var note = ""
     @State private var saved = false
     @FocusState private var focused: Bool
@@ -196,6 +197,40 @@ struct QuickCaptureView: View {
         .padding(.vertical, Journal.Space.s)
     }
 
+    // MARK: - Smart capture
+
+    /// The currently-open activity's project, or — scanning newest-first — the
+    /// first `leadingUp` event that has one. Stops at the first `cwd` found,
+    /// whether or not a `ProjectNote` exists for it: this is a single best guess,
+    /// not a search across every project mentioned in the last 20 minutes.
+    private func projectNoteCandidate() -> String? {
+        let cwd = current?.metadata["cwd"] ?? leadingUp.compactMap { $0.metadata["cwd"] }.first
+        guard let cwd, !cwd.isEmpty else { return nil }
+        return (try? model.store.projectNote(for: cwd))?.building
+    }
+
+    /// The most recent `leadingUp` event with something asked of an agent. Mirrors
+    /// the `context` view below (`QuickCaptureView.swift:176-178`): `metadata["asked"]`
+    /// can hold several newline-joined prompts, and only the last is shown.
+    private func lastAgentPromptCandidate() -> String? {
+        guard let raw = leadingUp.first(where: { !($0.metadata["asked"] ?? "").isEmpty })?.metadata["asked"],
+              let lastLine = raw.split(separator: "\n").last
+        else { return nil }
+        return AgentSession.condense(String(lastLine))
+    }
+
+    /// Recomputes the suggestion. A no-op once the user has typed anything (by
+    /// hand, or by accepting an earlier suggestion) — the row is already gone and
+    /// should stay gone rather than reappearing with different text.
+    private func recomputeSuggestion(tabNote: String?) {
+        guard note.isEmpty else { return }
+        suggestion = CaptureSuggester.suggest(CaptureSuggestionInput(
+            projectNote: projectNoteCandidate(),
+            tabNote: tabNote,
+            lastAgentPrompt: lastAgentPromptCandidate()
+        ))
+    }
+
     // MARK: - Actions
 
     private func load() {
@@ -203,12 +238,20 @@ struct QuickCaptureView: View {
         current = try? model.store.openActivity()
         leadingUp = (try? model.store.activityLeadingUp(to: Date())) ?? []
         note = current?.note ?? ""
+        recomputeSuggestion(tabNote: nil)
 
         // Enrich with the browser tab a moment later, so the panel appears at once.
         let snapshot = self.snapshot
         Task.detached(priority: .userInitiated) {
             let enriched = snapshot.resolvingBrowserTab()
-            await MainActor.run { if enriched != snapshot { resolved = enriched } }
+            await MainActor.run {
+                if enriched != snapshot {
+                    resolved = enriched
+                    if let url = enriched.url {
+                        recomputeSuggestion(tabNote: (try? model.store.noteForTab(url: url)) ?? nil)
+                    }
+                }
+            }
         }
     }
 
