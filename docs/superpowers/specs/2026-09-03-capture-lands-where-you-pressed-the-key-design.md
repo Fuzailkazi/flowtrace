@@ -63,9 +63,20 @@ public enum CaptureTargeting {
     /// note, only when the plan is to annotate that span, and never from a
     /// browser whose tab has not been read yet — at that moment the open span
     /// may be the previous tab, and its words would be the wrong words.
-    public static func prefill(open: ActivityEvent?, site: CaptureSite, recording: Bool) -> String?
+    /// Case selection does not depend on `now` (it only stamps a built event),
+    /// so `now` is defaulted here.
+    public static func prefill(
+        open: ActivityEvent?, site: CaptureSite, recording: Bool, now: Date = Date()
+    ) -> String?
+
+    /// Whether writing over `existing` is safe: there is nothing there, or it
+    /// is exactly what the field showed the user — they saw it and chose to
+    /// replace it. Anything else is words they never saw.
+    public static func mayOverwrite(existing: String?, shown: String?) -> Bool
 }
 ```
+
+`mayOverwrite` is true when `existing` is nil or blank, or equals `shown`; false otherwise.
 
 `CapturePlan` is deliberately not `Equatable`: "site as event" carries a fresh `UUID`, so tests pattern-match on the case and compare fields.
 
@@ -87,25 +98,26 @@ public enum CaptureTargeting {
 
 `beginSpan` goes through `Store.beginActivity`: if the recorder's open span is a different activity it is closed at `now` and the new span opened — what the recorder itself would do at its next tick, done earlier with better information. The recorder's next `captureFrontmost` coalesces into the new span: both sides take `appName` from `frontmostApplication.localizedName` and `pageTitle` from `BrowserTabReader`, so they describe the same activity.
 
-`recordPoint` goes through `Store.recordActivity` with `note`/`noteAt` already set, so recording-off captures are a single insert and can never leave a span open. A zero-duration noted event survives `allActivity`'s minimum-seconds filter because it is not unexplained, and renders as "under a minute".
+`recordPoint` goes through `Store.recordActivity` with `note`/`noteAt` already set, so recording-off captures are a single insert and can never leave a span open. A zero-duration noted event survives `allActivity`'s minimum-seconds filter because it is not unexplained, and renders as "under a minute" — `Store.noteTab` already writes exactly this shape, so points are an existing citizen of the timeline.
 
 ### 2. The view (`QuickCaptureView.swift`)
 
-- `FrontmostSnapshot` gains `var site: CaptureSite` — a one-line mapping (`isBrowser` and `automationDenied` already exist on it).
-- New state: `@State private var plan: CapturePlan?`. `recording` is `model.recorder.isRunning` — the fact about whether spans get closed.
-- `load()`: after `current = openActivity()`, set `plan = CaptureTargeting.plan(open: current, site: resolved.site, recording:, now:)` and `note = CaptureTargeting.prefill(open: current, site: resolved.site, recording:) ?? ""` (for a browser this is nil until the tab resolves). In the tab-enrichment continuation, after `resolved = enriched`: recompute `plan`; if `note.isEmpty`, set `note = prefill(...) ?? ""`; then the existing `recomputeSuggestion`. Order matters: a pre-fill that arrives suppresses the suggestion row, which is correct — the user already wrote about this span.
+- `FrontmostSnapshot` gains `var site: CaptureSite` — a one-line mapping (`isBrowser` and `automationDenied` already exist on it). `resolvingBrowserTab()` identifies the tab with `BrowserTabReader.activeTab(of:)` — the recorder's own definition of "the tab you are on" — and uses `tabsInFrontWindow(of:)` only for `openTabCount`. Today it takes `tabs.first(where: \.isActive) ?? tabs.first`, so when the active-tab index read fails the snapshot silently targets the *first* tab; a `beginSpan` built from that would file the note on the wrong tab and the recorder's next tick would open a third span.
+- New state: `@State private var plan: CapturePlan?`, `@State private var shownNote: String?` (what the field was pre-filled with, if anything), `@State private var enrichment: Task<Void, Never>?`, `@State private var saving = false`. `recording` is `model.recorder.isRunning` — the fact about whether spans get closed.
+- `load()`: after `current = openActivity()`, set `plan = CaptureTargeting.plan(open: current, site: resolved.site, recording:, now:)` and, if `prefill(...)` is non-nil, set both `note` and `shownNote` to it (for a browser this is nil until the tab resolves). Keep the tab-enrichment `Task` in `enrichment`. In its continuation, after `resolved = enriched`: recompute `plan`; if `note.isEmpty` and `prefill(...)` is non-nil, set `note` and `shownNote`; then the existing `recomputeSuggestion`. Order matters: a pre-fill that arrives suppresses the suggestion row, which is correct — the user already wrote about this span.
 - `header`: show `current.durationLabel` only when `plan` is `.annotateOpen` (today it shows the open span's duration under whatever title `resolved` has).
-- `save()`: re-fetch `open = try model.store.openActivity()` (the load-time value can be seconds stale), recompute `plan`, then:
-  - `.annotateOpen(open, backfillURL, backfillTitle)` → `describeActivity` when a back-fill is present, then `annotate(activityId: open.id, note: text)`.
-  - `.beginSpan(event)` → `let target = try beginActivity(event)`. **If `target.note` is non-empty and differs from `text`** — `beginActivity`'s 5-minute resume branch handed back a span you noted earlier and have not seen in this panel — do not overwrite it: record `text` as a point instead (`recordActivity` with the site as event, `startedAt = endedAt = now`, note set). Otherwise `annotate(activityId: target.id, note: text)`. Your earlier words are never destroyed by later ones.
-  - `.recordPoint(event)` → `var e = event; e.note = text; e.noteAt = now; try recordActivity(e)`.
-- Failure: new `@State private var saveError: String?`. On `catch`, set it to a fixed human sentence ("Couldn't write that down. Your words are still here — press Return to try again."), log `error` via `Diagnostics.log`, and do **not** call `onFinish()`. Render it under the field in `Journal.amber`, in the style of `automationNotice`. Clear it when the text changes. Success path unchanged ("Written down.", dismiss after 600ms).
+- `save()` becomes `Task { @MainActor in … }` guarded by `saving` (a second Return while a save is in flight is ignored, so nothing is written twice). It first awaits `enrichment` with a bound of 1.5 seconds — race it against `Task.sleep`; on timeout proceed with the current `resolved` — because a one-word note plus Return can beat a browser with many tabs, and saving against an unresolved site would land on the previous tab: exactly failure (2). Then re-fetch `open = try model.store.openActivity()` (the load-time value can be seconds stale), recompute `plan` from `resolved.site`, and resolve the target:
+  - `.annotateOpen(open, backfillURL, backfillTitle)` → target is `open`; `describeActivity` when a back-fill is present.
+  - `.beginSpan(event)` → `target = try beginActivity(event)` (its 5-minute resume branch may hand back a span you noted earlier).
+  - `.recordPoint(event)` → `var e = event; e.note = text; e.noteAt = now; try recordActivity(e)`; done.
+  For `.annotateOpen` and `.beginSpan` alike: **if `!CaptureTargeting.mayOverwrite(existing: target.note, shown: shownNote)`**, the span carries words this panel never showed — the tab read failed for a non-permission reason and the span is the previous tab's, or the user typed before the pre-fill could land, or the resume branch returned an older span — so record `text` as a point instead (`recordActivity` with the site as event, `startedAt = endedAt = now`, note set). Otherwise `annotate(activityId: target.id, note: text)`. Your earlier words are never destroyed by words you typed without seeing them; replacing a pre-filled note you *did* see is intentional.
+- Failure: new `@State private var saveError: String?`. On `catch`, set it to a fixed human sentence ("Couldn't write that down. Your words are still here — press Return to try again."), log `error` via `Diagnostics.log`, clear `saving`, and do **not** call `onFinish()`. Render it under the field in `Journal.amber`, in the style of `automationNotice`. Clear it when the text changes. Success path unchanged ("Written down.", dismiss after 600ms).
 
 ### 3. Span lifecycle (`ActivityRecorder.swift`, `ActivityStore.swift`, `AppModel.swift`, `AppLifecycle.swift`)
 
-- **Quit closes the span, running or not.** `ActivityRecorder.init` registers, once, for `NSApplication.willTerminateNotification` on `NotificationCenter.default` and calls `closeSpan()`. It is registered outside `start()`/`stop()` (which manage workspace-centre observers only) so toggling recording neither leaks nor loses it. `AppLifecycle.applicationWillTerminate` keeps its log line; its comment is corrected to say the recorder closes the span.
-- **Heartbeat.** `public static let lastSeenAtKey = "flowtrace.recorder.lastSeenAt"` on `ActivityRecorder`. Every `captureFrontmost()` and every idle tick writes `Date()` to `UserDefaults.standard` under it. It is the only way to know when the machine actually stopped after a crash or a force-quit.
-- **Stale spans are closed at launch, before anything can resume them.** New `Store.closeStaleOpenActivity(lastSeenAt: Date?, now: Date = Date()) -> Int` (`@discardableResult`, returns the count so launch can log it): for every event with `endedAt == nil`, `endedAt = max(startedAt, min(now, (lastSeenAt ?? startedAt) + 60))`. With no heartbeat (first run after upgrade) a stale span becomes one minute long rather than a lie. **Called synchronously as the first statement of `AppModel.startRecordingIfEnabled()`** — read the heartbeat, close, log — *before* `recorder.start()`, whose first `captureFrontmost()` would otherwise close the span at `now` or resume it. It runs whether or not recording is on, which also repairs the immortal rows the old bug left in existing databases.
+- **Quit closes the span, running or not.** `ActivityRecorder.init` registers, once, for `NSApplication.willTerminateNotification` on `NotificationCenter.default` and calls `closeSpan()`. It is registered outside `start()`/`stop()` (which manage workspace-centre observers only) so toggling recording neither leaks nor loses it. `AppModel.recorder` is created lazily on first access, so with recording off the observer exists only once something has read `model.recorder` — which is fine: a recorder that was never created never opened a span. `AppLifecycle.applicationWillTerminate` keeps its log line; its comment is corrected to say the recorder closes the span.
+- **Heartbeat.** `public static let lastSeenAtKey = "flowtrace.recorder.lastSeenAt"` on `ActivityRecorder`. The first statement of `captureFrontmost()` — before its `isRunning`/`isIdle` guards — and of `checkIdle()` writes `Date()` to `UserDefaults.standard` under it. It is the only way to know when the machine actually stopped after a crash or a force-quit.
+- **Stale spans are closed at launch, before anything can resume them.** New `Store.closeStaleOpenActivity(lastSeenAt: Date?, now: Date = Date()) -> Int` (`@discardableResult`, returns the count so launch can log it): for every event with `endedAt == nil`, `endedAt = max(startedAt, min(now, (lastSeenAt ?? startedAt) + 60))`. With no heartbeat (first run after upgrade) a stale span becomes one minute long rather than a lie. **Called synchronously as the first statement of `AppModel.startRecordingIfEnabled()`** — read the heartbeat, close, log — *before* `recorder.start()`, whose first `captureFrontmost()` would otherwise close the span at `now` or resume it. It runs whether or not recording is on, which also repairs the immortal rows the old bug left in existing databases. It closes *every* open row; that is safe because only the recorder and the capture panel ever write open spans — `SessionImporter` and `noteTab` write closed rows — and this invariant is the reason a future importer must not write `endedAt == nil`.
 
 ### 4. Out of scope (later tiers)
 
@@ -117,25 +129,28 @@ public enum CaptureTargeting {
 ## Testing
 
 `Sources/FlowTraceTests/CaptureTargetingTests.swift`, registered in `main.swift`, one `TestKit.test` per rule row above (pattern-match the case, compare fields), plus:
+- Same app, both URLs non-nil and different → `beginSpan`, and `prefill` is nil — failure (2), the headline case.
 - Same app, nil bundle on one side → `beginSpan`.
 - `prefill`: browser site with `url == nil` and not denied → nil even when the open span has a note; same site with `automationDenied` → the open span's note; non-browser same-app site → the open span's note; recording off → nil; different app → nil.
+- `mayOverwrite`: (nil, nil) true; ("", nil) true; ("x", "x") true; ("x", nil) false; ("x", "y") false.
 - `recordPoint` event has `endedAt == startedAt == now` and `kind == .app` when `url == nil`, `.browserTab` otherwise.
 
 `ActivityTests.swift` additions (real in-memory store, as the existing tests do):
 - Two `recordActivity` noted points from different apps → `activity(on:)` lists two noted rows; `openActivity()` is nil.
-- `closeStaleOpenActivity`: open span started 09:00, `lastSeenAt` 17:30 → closed 17:31, returns 1; `lastSeenAt` nil → closed 09:01; `lastSeenAt` earlier than `startedAt` → closed at `startedAt`; an already-closed span is untouched, returns 0.
+- `closeStaleOpenActivity`: open span started 09:00, `lastSeenAt` 17:30 → closed 17:31, returns 1; `lastSeenAt` nil → closed 09:01; `lastSeenAt` five minutes *before* `startedAt` → closed at `startedAt` (zero length, never before start); an already-closed span is untouched, returns 0.
 - `beginActivity` from a browser-tab event while a different tab is open closes the old span at the new event's start.
 - `beginActivity` resume: note tab A, switch to B, return to A within the merge gap → the returned span is A **with its note intact** (this is the store behaviour the `save()` rule depends on).
 
-The view's remaining branching — three plan cases and the resume check — is verified by hand.
+The view's remaining branching — three plan cases, the enrichment wait, and the overwrite check — is verified by hand.
 
 ## Manual verification
 
 With `Scripts/dev.sh`, on a fresh database *and* on the author's real one (back it up first):
 1. Recording **off**. Capture in Safari, then capture in Terminal. Today shows two noted rows, neither pre-filled the other, Smart Capture row visible on the second. `openActivity()` is nil (raw view).
 2. Recording **on**. Open a new tab and press the key within 10 seconds. The note lands on the new tab (Today row shows its title; `noteForTab` for its URL returns it), not the previous one. The field was empty when the panel opened, not pre-filled with the previous tab's words.
-3. Recording **on**, in VS Code or a terminal. Capture: the note lands on the recorder's open span for that app (Today shows one row with the window title, not a bare title-less row).
+3. Recording **on**, Accessibility granted, in VS Code or a terminal. Capture: the note lands on the recorder's open span for that app (Today shows one row with the window title, not a bare title-less row).
 4. Recording **on**, Automation denied for the browser. Capture over a tab: the note lands on the recorder's open span for that browser; the panel shows the Allow… notice.
 5. Note tab A, switch to B, come back to A within a minute, capture a *different* sentence: Today shows both sentences (A's original and the new point); nothing was overwritten.
-6. Quit FlowTrace with a span open, relaunch: `debug.log` records one stale span closed at the heartbeat time; a capture the next morning is a fresh row dated today.
-7. Simulate a failure (e.g. make the database read-only): the panel stays open, the sentence is still in the field, the amber line explains, Return retries after restoring.
+6. Note tab A. Open tab B and, the instant the panel appears, type one word and press Return before the header has changed from the browser's name to the page title: the note lands on B (the save waited for the tab), and A's note is untouched. Then, on a browser with many tabs, do the same on a tab whose span the recorder has already noted: if the pre-fill had not appeared before you typed, Today shows your word as a separate point, not as a replacement.
+7. Quit FlowTrace with a span open, relaunch: `debug.log` records one stale span closed at the heartbeat time; a capture the next morning is a fresh row dated today.
+8. Simulate a failure (e.g. make the database read-only): the panel stays open, the sentence is still in the field, the amber line explains, Return retries after restoring; a double Return during the retry writes once.
