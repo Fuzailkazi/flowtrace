@@ -1,6 +1,6 @@
 # Capture lands where you pressed the key
 
-Sub-project A of Tier 0 in `docs/superpowers/audits/2026-09-03-product-audit-and-launch-roadmap.md` (item 0.1). Tier 0 is executed as four sub-projects, each with its own spec and plan, in the audit's order: **A** this one; **B** privacy claims made true (0.2, 0.3, 1.9); **C** first run and the shortcut story (0.4, 0.5, 0.6); **D** the launch wrapper (0.7).
+Sub-project A of Tier 0 in `docs/superpowers/audits/2026-09-03-product-audit-and-launch-roadmap.md` (item 0.1). Tier 0 is executed as five sub-projects, each with its own spec and plan, in the audit's order: **A** this one; **B** nothing is read before you say so (0.2); **C** redact at the choke point (0.3, 1.9); **D** first run and the shortcut story (0.4, 0.5, 0.6); **E** the launch wrapper (0.7).
 
 ## Problem
 
