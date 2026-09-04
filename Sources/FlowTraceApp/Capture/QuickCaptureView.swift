@@ -60,7 +60,7 @@ struct QuickCaptureView: View {
 
                 // Escape works, but a panel with no visible way out reads as a
                 // thing that has taken over rather than one you summoned.
-                Button(action: onFinish) {
+                Button(action: { if !saving { onFinish() } }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Journal.inkSoft)
@@ -138,6 +138,7 @@ struct QuickCaptureView: View {
                     acceptSuggestion()
                     return .handled
                 }
+                .onChange(of: note) { _, _ in saveError = nil }
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(Journal.paper, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -145,6 +146,21 @@ struct QuickCaptureView: View {
                 )
 
             suggestionRow
+
+            if let saveError {
+                HStack(spacing: Journal.Space.s) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Journal.amber)
+                    Text(saveError)
+                        .font(.observed(11.5))
+                        .foregroundStyle(Journal.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
+                .padding(.horizontal, 9).padding(.vertical, 5)
+                .background(Journal.amberSoft, in: RoundedRectangle(cornerRadius: 6))
+            }
 
             HStack(spacing: Journal.Space.s) {
                 Text("⏎ save").font(.observed(10.5)).foregroundStyle(Journal.inkSoft)
@@ -158,7 +174,7 @@ struct QuickCaptureView: View {
             }
         }
         .background {
-            Button("", action: onFinish)
+            Button("") { if !saving { onFinish() } }
                 .keyboardShortcut(.escape, modifiers: [])
                 .opacity(0)
         }
@@ -349,44 +365,88 @@ struct QuickCaptureView: View {
     private func save() {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { onFinish(); return }
+        guard !saving else { return }
+        saving = true
+        saveError = nil
 
-        do {
-            // Annotate the span you are inside. If the recorder isn't running
-            // there is nothing to annotate, so make the entry too — a note should
-            // never be lost because capture happened to be off.
-            let target: ActivityEvent
-            if let current {
-                // The span may have been opened before the tab could be read —
-                // the note should still land on the page, not on "Brave Browser".
-                if current.url == nil, let url = resolved.url {
-                    try model.store.describeActivity(
-                        id: current.id, target: resolved.pageTitle, url: url
-                    )
-                }
-                target = current
-            } else {
-                target = try model.store.beginActivity(ActivityEvent(
-                    kind: resolved.url != nil ? .browserTab : .app,
-                    startedAt: Date(),
-                    appName: resolved.appName,
-                    bundleIdentifier: resolved.bundleIdentifier,
-                    target: resolved.pageTitle,
-                    url: resolved.url,
-                    metadata: resolved.openTabCount > 1
-                        ? ["tabsOpen": String(resolved.openTabCount)] : [:]
-                ))
-            }
+        Task { @MainActor in
+            defer { saving = false }
+            await waitForTab()
 
-            _ = try model.store.annotate(activityId: target.id, note: text)
-            model.refresh()
-            saved = true
-            Task { @MainActor in
+            do {
+                // The load-time span can be seconds stale, and which tab you are
+                // on may only just have arrived.
+                current = try model.store.openActivity()
+                refreshPlan()
+                try write(text)
+
+                model.refresh()
+                saved = true
                 try? await Task.sleep(for: .milliseconds(600))
                 onFinish()
+            } catch {
+                Diagnostics.log("capture save failed: \(error)")
+                saveError = "Couldn't write that down. Your words are still here — press Return to try again."
             }
-        } catch {
-            model.toast = Toast(message: error.localizedDescription, isError: true)
-            onFinish()
         }
+    }
+
+    /// Waits for the tab to be identified, but not for long.
+    ///
+    /// A one-word note and a fast Return can beat the AppleScript round trip,
+    /// and saving before the tab is known files the note on the page you left.
+    /// A polled flag rather than awaiting the task: the read is a synchronous
+    /// Apple Event whose own timeout is two minutes, so there is nothing to
+    /// cancel and nothing that would return early.
+    private func waitForTab() async {
+        guard !enrichmentFinished else { return }
+        let deadline = ContinuousClock.now + .seconds(1.5)
+        while !enrichmentFinished, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    private func write(_ text: String) throws {
+        let now = Date()
+        switch plan ?? .recordPoint(ActivityEvent(
+            kind: .app, startedAt: now, endedAt: now, appName: resolved.appName
+        )) {
+        case .recordPoint(var event):
+            event.note = text
+            event.noteAt = now
+            try model.store.recordActivity(event)
+
+        case .annotateOpen(let open, let url, let title):
+            if url != nil || title != nil {
+                try model.store.describeActivity(id: open.id, target: title, url: url)
+            }
+            try annotate(open, with: text, at: now)
+
+        case .beginSpan(let event):
+            // Coalescing may hand back a span you noted earlier and have not
+            // seen in this panel — `annotate` would replace those words.
+            let target = try model.store.beginActivity(event)
+            try annotate(target, with: text, at: now)
+        }
+    }
+
+    private func annotate(_ target: ActivityEvent, with text: String, at now: Date) throws {
+        // Already said, nothing to do — accepting a suggestion sourced from this
+        // very page arrives here.
+        if target.note == text { return }
+
+        guard CaptureTargeting.mayOverwrite(existing: target.note, shown: shownNote) else {
+            // Words the panel never showed. Keep both: yours goes down beside
+            // them rather than over them.
+            try model.store.recordActivity(ActivityEvent(
+                kind: resolved.url != nil ? .browserTab : .app,
+                startedAt: now, endedAt: now,
+                appName: resolved.appName, bundleIdentifier: resolved.bundleIdentifier,
+                target: resolved.pageTitle, url: resolved.url,
+                note: text, noteAt: now
+            ))
+            return
+        }
+        _ = try model.store.annotate(activityId: target.id, note: text)
     }
 }
