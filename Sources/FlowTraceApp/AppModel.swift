@@ -130,6 +130,15 @@ final class AppModel {
     }
 
     func startRecordingIfEnabled() {
+        // Before anything can extend or resume them: close spans that a crash,
+        // a quit, or a capture taken with the recorder off left open.
+        let lastSeenAt = UserDefaults.standard.object(
+            forKey: ActivityRecorder.lastSeenAtKey
+        ) as? Date
+        if let closed = try? store.closeStaleOpenActivity(lastSeenAt: lastSeenAt), closed > 0 {
+            Diagnostics.log("activity: closed \(closed) span(s) left open")
+        }
+
         if isRecording { recorder.start() }
         importSessions()
 

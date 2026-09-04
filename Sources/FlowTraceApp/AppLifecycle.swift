@@ -29,8 +29,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Close the open activity span on the way out, so the last app of the day
-    /// doesn't appear to have been used all night.
+    /// The recorder closes its own open span on termination — see
+    /// `ActivityRecorder.init`. This is here for the log line only.
     func applicationWillTerminate(_ notification: Notification) {
         Diagnostics.log("app terminating")
     }

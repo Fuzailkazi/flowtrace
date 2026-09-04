@@ -42,6 +42,10 @@ public final class ActivityRecorder {
     /// Set when window titles are wanted but Accessibility hasn't been granted.
     public private(set) var wantsAccessibility = false
 
+    /// When the recorder last knew the machine was alive. Read at launch to
+    /// close a span a crash left open, since a crash writes nothing.
+    public static let lastSeenAtKey = "flowtrace.recorder.lastSeenAt"
+
     /// Browsers FlowTrace has met but is not allowed to ask about tabs.
     public private(set) var browsersNeedingPermission: Set<String> = []
 
@@ -50,6 +54,16 @@ public final class ActivityRecorder {
 
     public init(store: Store) {
         self.store = store
+        #if canImport(AppKit)
+        // Every other stored property has a default, so `self` is fully formed
+        // by this line and may be captured. Weakly: the notification centre
+        // would otherwise own the recorder for the life of the process, and this
+        // token is never removed — quitting is the only thing it fires on.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main,
+            using: { [weak self] _ in MainActor.assumeIsolated { self?.closeSpan() } }
+        )
+        #endif
     }
 
     // MARK: - Lifecycle
@@ -113,6 +127,7 @@ public final class ActivityRecorder {
 
     /// Records whatever is in front right now, enriched as far as permissions allow.
     public func captureFrontmost() {
+        UserDefaults.standard.set(Date(), forKey: Self.lastSeenAtKey)
         guard isRunning, !isIdle else { return }
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
         guard let bundleId = app.bundleIdentifier,
@@ -194,6 +209,7 @@ public final class ActivityRecorder {
     }
 
     private func checkIdle() {
+        UserDefaults.standard.set(Date(), forKey: Self.lastSeenAtKey)
         guard isRunning else { return }
         if isIdle {
             closeSpan()
