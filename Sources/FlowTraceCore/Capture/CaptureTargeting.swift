@@ -28,11 +28,17 @@ public struct CaptureSite: Sendable, Equatable {
     /// business".
     public var isEditor: Bool
 
+    /// Whether the editor has actually been asked yet. `placeName == nil` alone
+    /// cannot say: the panel resolves the place in its own task, and a fast
+    /// Return reaches the write while that task is still waiting for the
+    /// editor's blur — a state that must not be read as "there is no project".
+    public var placeChecked: Bool
+
     public init(
         appName: String, bundleIdentifier: String? = nil, pageTitle: String? = nil,
         url: String? = nil, openTabCount: Int = 0, isBrowser: Bool = false,
         automationDenied: Bool = false, placeName: String? = nil, placeRoot: String? = nil,
-        isEditor: Bool = false
+        isEditor: Bool = false, placeChecked: Bool = false
     ) {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
@@ -44,6 +50,7 @@ public struct CaptureSite: Sendable, Equatable {
         self.placeName = placeName
         self.placeRoot = placeRoot
         self.isEditor = isEditor
+        self.placeChecked = placeChecked
     }
 
     /// What this capture knows about the place. `.clear` only for an editor
@@ -56,7 +63,11 @@ public struct CaptureSite: Sendable, Equatable {
     /// a second copy of this rule is a second place for it to drift.
     public var placeBackfill: PlaceBackfill {
         if let placeName { return .set(name: placeName, root: placeRoot ?? placeName) }
-        return isEditor ? .clear : .unchanged
+        // Nothing found. Only clear a stale place once we have actually looked —
+        // a fast Return can reach the write before the editor has been asked, and
+        // "not yet" must not erase what an earlier capture got right.
+        guard isEditor, placeChecked else { return .unchanged }
+        return .clear
     }
 }
 

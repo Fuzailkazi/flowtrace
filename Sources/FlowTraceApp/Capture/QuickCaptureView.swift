@@ -364,6 +364,7 @@ struct QuickCaptureView: View {
                 if identified != snapshot {
                     var next = identified
                     next.place = resolved.place
+                    next.placeChecked = resolved.placeChecked
                     resolved = next
                 }
                 refreshPlan()
@@ -386,6 +387,7 @@ struct QuickCaptureView: View {
                 if counted != identified {
                     var next = counted
                     next.place = resolved.place
+                    next.placeChecked = resolved.placeChecked
                     resolved = next
                 }
             }
@@ -417,8 +419,14 @@ struct QuickCaptureView: View {
             }
             let place = EditorPlace.place(forBundleIdentifier: snapshot.bundleIdentifier)
             await MainActor.run {
-                // Only `place` — the whole snapshot belongs to the tab task.
+                // Only these two fields — the whole snapshot belongs to the tab
+                // task. `placeChecked` is set unconditionally and in the same
+                // turn as `place`, so a genuine nil answer is recorded as
+                // *asked*: that is what entitles the write to clear a stale
+                // place, and what stops a fast Return from clearing one before
+                // this task has had a chance to look.
                 resolved.place = place
+                resolved.placeChecked = true
                 refreshPlan()
                 recomputeSuggestion(tabNote: tabNote)
             }

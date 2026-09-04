@@ -196,4 +196,61 @@ func runCaptureTargetingTests() {
         expect(!CaptureTargeting.mayOverwrite(existing: "x", shown: nil))
         expect(!CaptureTargeting.mayOverwrite(existing: "x", shown: "y"))
     }
+
+    TestKit.suite("CaptureTargeting — what a capture says about the place")
+
+    // Built directly rather than through `site()`: this rule reads four fields
+    // and nothing else, and the point is which combination of them clears a row.
+    func editorSite(place: String? = nil, root: String? = nil, checked: Bool) -> CaptureSite {
+        CaptureSite(
+            appName: "Code", bundleIdentifier: "com.microsoft.VSCode", isBrowser: false,
+            placeName: place, placeRoot: root, isEditor: true, placeChecked: checked
+        )
+    }
+
+    // The bug this rule exists for: the place resolves in its own task, and
+    // `save()` waits only on the tab. A one-word note and a fast Return reach
+    // the write while the editor is still being asked — and a nil answer there
+    // means "not yet", never "no project". Clearing on it would strip a place
+    // an earlier, slower capture had labelled correctly, and set nothing.
+    TestKit.test("an editor not yet asked leaves the row's place alone") {
+        expectEqual(editorSite(checked: false).placeBackfill, .unchanged)
+    }
+
+    // Asked and answered with nothing: the editor is frontmost with no folder
+    // open, or the answer was refused as stale. A place on the row is now known
+    // to be wrong, and a note must not land under a project it wasn't written in.
+    TestKit.test("an editor asked and silent clears a stale place") {
+        expectEqual(editorSite(checked: true).placeBackfill, .clear)
+    }
+
+    // Anything we could never have asked has no opinion, whatever the flag says
+    // — otherwise every browser capture would strip a place an editor capture
+    // put on the open span they share.
+    TestKit.test("a non-editor never touches the row's place") {
+        expectEqual(site().placeBackfill, .unchanged)
+        expectEqual(site(url: "https://a.example").placeBackfill, .unchanged)
+        expectEqual(
+            CaptureSite(appName: "TextEdit", bundleIdentifier: "com.apple.TextEdit",
+                        isBrowser: false, placeChecked: true).placeBackfill,
+            .unchanged
+        )
+    }
+
+    TestKit.test("an answer is written whether or not the flag was set") {
+        expectEqual(
+            editorSite(place: "flowtrace", root: "/Users/dev/flowtrace", checked: true).placeBackfill,
+            .set(name: "flowtrace", root: "/Users/dev/flowtrace")
+        )
+        expectEqual(
+            editorSite(place: "flowtrace", root: "/Users/dev/flowtrace", checked: false).placeBackfill,
+            .set(name: "flowtrace", root: "/Users/dev/flowtrace")
+        )
+        // A name with no root still names a place; `cwd` falls back to it rather
+        // than being left out, so the two keys are always written together.
+        expectEqual(
+            editorSite(place: "flowtrace", checked: true).placeBackfill,
+            .set(name: "flowtrace", root: "flowtrace")
+        )
+    }
 }

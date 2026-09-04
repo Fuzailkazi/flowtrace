@@ -21,6 +21,12 @@ struct FrontmostSnapshot: Equatable {
     /// after the panel draws — see the place task in `QuickCaptureView.load()`,
     /// which waits for the write our own activation triggers.
     var place: Place?
+    /// Whether that task has finished, whatever it found. It lives here beside
+    /// `place` rather than in view state because `site` is built from this
+    /// snapshot and `site` is what the rules read: a nil `place` alone cannot
+    /// tell "the editor gave no answer" from "we have not asked yet", and only
+    /// the first of those may clear a place off a row.
+    var placeChecked = false
 
     /// The app is a browser we know how to talk to, whether or not we managed to.
     var isBrowser: Bool {
@@ -72,7 +78,8 @@ struct FrontmostSnapshot: Equatable {
             // capture with no place could not be told apart from a capture that
             // was never entitled to one, and every browser note would clear the
             // place an editor capture put on the shared open span.
-            isEditor: EditorFamily.matching(bundleIdentifier: bundleIdentifier) != nil
+            isEditor: EditorFamily.matching(bundleIdentifier: bundleIdentifier) != nil,
+            placeChecked: placeChecked
         )
     }
 
