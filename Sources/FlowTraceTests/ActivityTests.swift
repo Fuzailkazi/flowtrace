@@ -260,6 +260,40 @@ func runActivityTests() {
         )
         expectEqual(closed.endedAt, switched)
     }
+
+    TestKit.suite("Describing what a row is")
+
+    TestKit.test("metadata is merged, not replaced") {
+        let store = try store()
+        let event = try store.recordActivity(ActivityEvent(
+            kind: .browserTab, startedAt: Date(), appName: "Safari",
+            metadata: ["tabsOpen": "11"]
+        ))
+        try store.describeActivity(id: event.id, metadata: ["place": "flowtrace"])
+        let after = try unwrap(try store.allActivity(on: event.startedAt, minimumSeconds: 0).first)
+        expectEqual(after.metadata["tabsOpen"], "11", "existing key survived")
+        expectEqual(after.metadata["place"], "flowtrace")
+    }
+
+    // A note and its place are written together or not at all — otherwise a
+    // capture with no answer leaves the previous capture's project on the row.
+    TestKit.test("a nil value removes the key") {
+        let store = try store()
+        let event = try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: Date(), appName: "Code",
+            metadata: ["place": "old-project", "cwd": "/tmp/old", "tabsOpen": "2"]
+        ))
+        try store.describeActivity(id: event.id, metadata: ["place": nil, "cwd": nil])
+        let after = try unwrap(try store.allActivity(on: event.startedAt, minimumSeconds: 0).first)
+        expectNil(after.metadata["place"])
+        expectNil(after.metadata["cwd"])
+        expectEqual(after.metadata["tabsOpen"], "2", "unrelated key survived")
+    }
+
+    TestKit.test("describing a row that is gone changes nothing") {
+        let store = try store()
+        try store.describeActivity(id: "not-a-row", metadata: ["place": "x"])
+    }
 }
 
 func runSessionImportTests() {

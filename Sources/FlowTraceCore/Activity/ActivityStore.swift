@@ -182,6 +182,29 @@ extension Store {
         }
     }
 
+    /// Fills in free detail once it becomes known — the project an editor had
+    /// in front when a note was written, say.
+    ///
+    /// Merges rather than replaces, because `metadata` is shared: `tabsOpen`,
+    /// `asked` and `messages` all live there. A nil value removes its key, so
+    /// a caller with no answer can clear a stale one rather than leave it.
+    ///
+    /// Only the recorder and the capture panel ever write the open span, and
+    /// this is only ever called on a row a note is landing on — so it cannot
+    /// reach an imported `agentSession` row, whose metadata a re-import
+    /// replaces wholesale.
+    public func describeActivity(id: String, metadata: [String: String?]) throws {
+        guard !metadata.isEmpty else { return }
+        try database.writer.write { db in
+            guard var event = try ActivityEvent.fetchOne(db, key: id) else { return }
+            for (key, value) in metadata {
+                if let value { event.metadata[key] = value }
+                else { event.metadata.removeValue(forKey: key) }
+            }
+            try event.update(db)
+        }
+    }
+
     /// Writes your reason onto an event. This is the point of the whole app.
     @discardableResult
     public func annotate(activityId: String, note: String) throws -> ActivityEvent? {
