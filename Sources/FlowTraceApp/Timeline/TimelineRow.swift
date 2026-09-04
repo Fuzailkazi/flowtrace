@@ -58,6 +58,16 @@ struct TimelineRow: View {
                     .foregroundStyle(Journal.inkMid)
                     .lineLimit(1)
                     .truncationMode(.middle)
+            } else if let place = event.metadata["place"], !place.isEmpty {
+                // After `target`, never before it: if Accessibility is ever
+                // granted, a window title is a more specific label than a
+                // project name and must not be hidden behind it.
+                Text("·").foregroundStyle(Journal.ruleFirm)
+                Text(place)
+                    .font(.observed(13.5))
+                    .foregroundStyle(Journal.inkMid)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
 
             if event.kind == .agentSession {

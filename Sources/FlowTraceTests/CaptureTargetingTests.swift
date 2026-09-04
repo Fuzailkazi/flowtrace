@@ -88,7 +88,7 @@ func runCaptureTargetingTests() {
             open: span(title: "Safari", url: nil),
             site: site(title: "B", url: "https://b.example"), recording: true, now: now
         )
-        guard case .annotateOpen(_, let url, let title) = plan else {
+        guard case .annotateOpen(_, let url, let title, _) = plan else {
             TestKit.fail("expected annotateOpen, got \(plan)"); return
         }
         expectEqual(url, "https://b.example")
@@ -103,7 +103,7 @@ func runCaptureTargetingTests() {
             site: site(app: "Code", bundle: "com.microsoft.VSCode", isBrowser: false),
             recording: true, now: now
         )
-        guard case .annotateOpen(let event, let url, let title) = plan else {
+        guard case .annotateOpen(let event, let url, let title, _) = plan else {
             TestKit.fail("expected annotateOpen, got \(plan)"); return
         }
         expectEqual(event.target, "main.swift")

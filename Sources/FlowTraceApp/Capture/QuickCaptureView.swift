@@ -23,6 +23,9 @@ struct QuickCaptureView: View {
     /// overwritten if the user actually saw it.
     @State private var shownNote: String?
     @State private var enrichmentFinished = false
+    /// What the tab continuation last computed, so a later suggestion refresh
+    /// can pass the same value rather than dropping it.
+    @State private var tabNote: String?
     @State private var saving = false
     @State private var saveError: String?
     @FocusState private var focused: Bool
@@ -294,7 +297,13 @@ struct QuickCaptureView: View {
     /// whether or not a `ProjectNote` exists for it: this is a single best guess,
     /// not a search across every project mentioned in the last 20 minutes.
     private func projectNoteCandidate() -> String? {
-        let cwd = current?.metadata["cwd"] ?? leadingUp.compactMap { $0.metadata["cwd"] }.first
+        // The editor's answer for right now beats a cwd left on a row by an
+        // earlier capture in another project. The open VS Code span outlives
+        // the project it was noted in, so without this the top-priority
+        // suggestion would be an hour-old project's "what am I building".
+        let cwd = resolved.place?.root
+            ?? current?.metadata["cwd"]
+            ?? leadingUp.compactMap { $0.metadata["cwd"] }.first
         guard let cwd, !cwd.isEmpty else { return nil }
         return (try? model.store.projectNote(for: cwd))?.building
     }
@@ -346,7 +355,17 @@ struct QuickCaptureView: View {
         Task.detached(priority: .userInitiated) {
             let identified = snapshot.resolvingActiveTab()
             await MainActor.run {
-                if identified != snapshot { resolved = identified }
+                // Two tasks own `resolved`: this one assigns whole snapshots
+                // built from a pre-place local, so it must carry over whatever
+                // the place task has already landed. Today `resolvingActiveTab`
+                // returns `self` for a non-browser and the equality guard skips
+                // the assignment — so the place would survive by accident, and
+                // a later change to that function would silently delete it.
+                if identified != snapshot {
+                    var next = identified
+                    next.place = resolved.place
+                    resolved = next
+                }
                 refreshPlan()
                 if note.isEmpty, let prefill = CaptureTargeting.prefill(
                     open: current, site: resolved.site, recording: model.recorder.isRunning
@@ -355,14 +374,54 @@ struct QuickCaptureView: View {
                     shownNote = prefill
                 }
                 if let url = identified.url {
-                    recomputeSuggestion(tabNote: (try? model.store.noteForTab(url: url)) ?? nil)
+                    tabNote = (try? model.store.noteForTab(url: url)) ?? nil
+                    recomputeSuggestion(tabNote: tabNote)
                 }
                 // Everything the note's destination depends on is now known.
                 enrichmentFinished = true
             }
 
             let counted = identified.resolvingTabCount()
-            await MainActor.run { if counted != identified { resolved = counted } }
+            await MainActor.run {
+                if counted != identified {
+                    var next = counted
+                    next.place = resolved.place
+                    resolved = next
+                }
+            }
+        }
+
+        // Only an editor is asked, and only ever about its own state file.
+        guard let family = EditorFamily.matching(bundleIdentifier: snapshot.bundleIdentifier)
+        else { return }
+
+        // The file is written when a window loses focus — and activating this
+        // panel is what blurs it. That write is throttled ~100ms, so reading
+        // immediately returns the window we *left*, which for a switch
+        // between two editor windows is the sibling project: the worst answer
+        // this feature could give. So wait for our own blur to land.
+        //
+        // Its own task, deliberately: the tab task above flips
+        // `enrichmentFinished`, and waiting here before that flip would put
+        // every non-browser capture behind the 1.5s bound in `save()`, which
+        // today it never touches.
+        let openedAt = Date()
+        Task.detached(priority: .userInitiated) {
+            let url = EditorPlace.storageURL(for: family, support: EditorPlace.defaultSupport)
+            let deadline = ContinuousClock.now + .milliseconds(400)
+            while ContinuousClock.now < deadline {
+                let written = (try? FileManager.default.attributesOfItem(atPath: url.path))
+                    .flatMap { $0[.modificationDate] as? Date }
+                if let written, written >= openedAt { break }
+                try? await Task.sleep(for: .milliseconds(40))
+            }
+            let place = EditorPlace.place(forBundleIdentifier: snapshot.bundleIdentifier)
+            await MainActor.run {
+                // Only `place` — the whole snapshot belongs to the tab task.
+                resolved.place = place
+                refreshPlan()
+                recomputeSuggestion(tabNote: tabNote)
+            }
         }
     }
 
@@ -426,22 +485,36 @@ struct QuickCaptureView: View {
 
     private func write(_ text: String) throws {
         let now = Date()
+        // The default is unreachable — `load()` always sets `plan`, and `save()`
+        // rebuilds it — so it needs no place: there is no row for one to land on
+        // that this fallback would be the one to describe.
         switch plan ?? .recordPoint(ActivityEvent(
             kind: .app, startedAt: now, endedAt: now, appName: resolved.appName
         )) {
         case .recordPoint(var event):
+            // The place is already in this event: `plan` built it from the site.
             event.note = text
             event.noteAt = now
             try model.store.recordActivity(event)
 
-        case .annotateOpen(let open, let url, let title):
-            try annotate(open, with: text, at: now, backfill: (url: url, title: title))
+        case .annotateOpen(let open, let url, let title, let place):
+            try annotate(
+                open, with: text, at: now, backfill: (url: url, title: title), place: place
+            )
 
         case .beginSpan(let event):
             // Coalescing may hand back a span you noted earlier and have not
             // seen in this panel — `annotate` would replace those words.
+            //
+            // And the place must be applied to the row this returns, not merely
+            // built into the event: `beginActivity` discards the passed event on
+            // two paths — the coalesce, and the five-minute resume — so an
+            // alt-tab to Slack and back would throw a freshly resolved place away.
             let target = try model.store.beginActivity(event)
-            try annotate(target, with: text, at: now, backfill: (url: nil, title: nil))
+            try annotate(
+                target, with: text, at: now, backfill: (url: nil, title: nil),
+                place: resolved.site.placeBackfill
+            )
         }
     }
 
@@ -454,7 +527,7 @@ struct QuickCaptureView: View {
     /// page happens to be in front now.
     private func annotate(
         _ target: ActivityEvent, with text: String, at now: Date,
-        backfill: (url: String?, title: String?)
+        backfill: (url: String?, title: String?), place: PlaceBackfill
     ) throws {
         // Already said, nothing to do — accepting a suggestion sourced from this
         // very page arrives here. No back-fill either: the row already carries
@@ -474,6 +547,18 @@ struct QuickCaptureView: View {
             try model.store.describeActivity(
                 id: target.id, target: backfill.title, url: backfill.url
             )
+        }
+
+        // Same path and same rule: the place is only ever said about a row this
+        // note is actually landing on. `.clear` is not "nothing to say" — it is
+        // an editor that gave no answer, and leaving an earlier capture's
+        // project on the row would file this sentence under the wrong one.
+        switch place {
+        case .unchanged: break
+        case .set(let name, let root):
+            try model.store.describeActivity(id: target.id, metadata: ["place": name, "cwd": root])
+        case .clear:
+            try model.store.describeActivity(id: target.id, metadata: ["place": nil, "cwd": nil])
         }
 
         // A nil return means the row is no longer there to write on. The target
@@ -497,7 +582,19 @@ struct QuickCaptureView: View {
             startedAt: now, endedAt: now,
             appName: resolved.appName, bundleIdentifier: resolved.bundleIdentifier,
             target: resolved.pageTitle, url: resolved.url,
-            note: text, noteAt: now
+            note: text, noteAt: now,
+            // Mirrors "site as event": a diverted note keeps its place, or the
+            // rescue point is the one row that cannot say where it was written.
+            // Read off the site, which is the single mapping from a `Place` to
+            // these two keys. `tabsOpen` is a browser concern and this is not
+            // one of those paths.
+            metadata: {
+                let site = resolved.site
+                var metadata: [String: String] = [:]
+                if let name = site.placeName { metadata["place"] = name }
+                if let root = site.placeRoot { metadata["cwd"] = root }
+                return metadata
+            }()
         ))
     }
 }

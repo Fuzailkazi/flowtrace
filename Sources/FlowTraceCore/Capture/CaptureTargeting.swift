@@ -16,10 +16,23 @@ public struct CaptureSite: Sendable, Equatable {
     /// macOS refused the read, so `url` is never going to arrive.
     public var automationDenied: Bool
 
+    /// The project the editor has in front, if it said. Stored as free detail,
+    /// never as `target`: `describesSameActivity` compares `target`, and the
+    /// recorder cannot produce this value, so a `target` set here would be
+    /// closed and replaced by the recorder's next tick.
+    public var placeName: String?
+    public var placeRoot: String?
+
+    /// True when this app is one whose focused window FlowTrace can read. Only
+    /// then does "no place" mean "clear the row's place" rather than "not my
+    /// business".
+    public var isEditor: Bool
+
     public init(
         appName: String, bundleIdentifier: String? = nil, pageTitle: String? = nil,
         url: String? = nil, openTabCount: Int = 0, isBrowser: Bool = false,
-        automationDenied: Bool = false
+        automationDenied: Bool = false, placeName: String? = nil, placeRoot: String? = nil,
+        isEditor: Bool = false
     ) {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
@@ -28,7 +41,34 @@ public struct CaptureSite: Sendable, Equatable {
         self.openTabCount = openTabCount
         self.isBrowser = isBrowser
         self.automationDenied = automationDenied
+        self.placeName = placeName
+        self.placeRoot = placeRoot
+        self.isEditor = isEditor
     }
+
+    /// What this capture knows about the place. `.clear` only for an editor
+    /// that gave no answer — for anything else the row's place is none of
+    /// this capture's business.
+    ///
+    /// Lives here, public, rather than as a helper inside `CaptureTargeting`:
+    /// the App layer needs the same value for the `beginSpan` and
+    /// `recordPoint` paths, which apply it to a row rather than to a plan, and
+    /// a second copy of this rule is a second place for it to drift.
+    public var placeBackfill: PlaceBackfill {
+        if let placeName { return .set(name: placeName, root: placeRoot ?? placeName) }
+        return isEditor ? .clear : .unchanged
+    }
+}
+
+/// What a capture knows about the place, for a row that may already carry one.
+///
+/// "No opinion" and "no answer" are different: a browser capture must not
+/// touch the keys, while an editor capture with no answer must clear a place
+/// an earlier capture left, or a note lands under the wrong project.
+public enum PlaceBackfill: Sendable, Equatable {
+    case unchanged
+    case set(name: String, root: String)
+    case clear
 }
 
 /// What to do with the sentence the user just typed.
@@ -38,7 +78,13 @@ public struct CaptureSite: Sendable, Equatable {
 public enum CapturePlan: Sendable {
     /// Write onto the span the recorder already has open. The back-fill fields
     /// are set when the span knows the app but not the page, and the site does.
-    case annotateOpen(ActivityEvent, backfillURL: String?, backfillTitle: String?)
+    ///
+    /// `place` rides along beside them because this is the dominant path —
+    /// recording on, same app, no url — so a place that only travelled on the
+    /// built-event paths would never be written at all.
+    case annotateOpen(
+        ActivityEvent, backfillURL: String?, backfillTitle: String?, place: PlaceBackfill
+    )
     /// Close whatever is open and begin a span for this site, via
     /// `Store.beginActivity` — whose coalescing and resume rules still apply.
     case beginSpan(ActivityEvent)
@@ -68,13 +114,20 @@ public enum CaptureTargeting {
         }
 
         if open.url == nil, let url = site.url {
-            return .annotateOpen(open, backfillURL: url, backfillTitle: site.pageTitle)
+            return .annotateOpen(
+                open, backfillURL: url, backfillTitle: site.pageTitle,
+                place: site.placeBackfill
+            )
         }
         // The snapshot cannot say more than "same app" — trust the span, which
         // has the window title or the tab the recorder managed to read.
-        guard let there = site.url else { return .annotateOpen(open, backfillURL: nil, backfillTitle: nil) }
+        guard let there = site.url else {
+            return .annotateOpen(
+                open, backfillURL: nil, backfillTitle: nil, place: site.placeBackfill
+            )
+        }
         guard open.url == there else { return .beginSpan(event(for: site, at: now, closed: false)) }
-        return .annotateOpen(open, backfillURL: nil, backfillTitle: nil)
+        return .annotateOpen(open, backfillURL: nil, backfillTitle: nil, place: site.placeBackfill)
     }
 
     /// The note to pre-fill the field with, if any: only the open span's own
@@ -87,7 +140,7 @@ public enum CaptureTargeting {
     ) -> String? {
         // Mid-read, the open span may still be the tab you just left.
         if site.isBrowser, site.url == nil, !site.automationDenied { return nil }
-        guard case .annotateOpen(let event, _, _) = plan(
+        guard case .annotateOpen(let event, _, _, _) = plan(
             open: open, site: site, recording: recording, now: now
         ) else { return nil }
         guard let note = event.note?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -121,7 +174,17 @@ public enum CaptureTargeting {
             bundleIdentifier: site.bundleIdentifier,
             target: site.pageTitle,
             url: site.url,
-            metadata: site.openTabCount > 1 ? ["tabsOpen": String(site.openTabCount)] : [:]
+            // The place goes here and never in `target`: `describesSameActivity`
+            // compares `target`, and the recorder cannot reproduce a project
+            // name, so a `target` set from it would be closed and replaced on
+            // the recorder's next tick. `metadata` is not compared, so it is free.
+            metadata: {
+                var metadata: [String: String] = [:]
+                if site.openTabCount > 1 { metadata["tabsOpen"] = String(site.openTabCount) }
+                if let name = site.placeName { metadata["place"] = name }
+                if let root = site.placeRoot { metadata["cwd"] = root }
+                return metadata
+            }()
         )
     }
 }

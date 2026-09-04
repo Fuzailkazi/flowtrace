@@ -39,8 +39,6 @@ public final class ActivityRecorder {
     private let idleThreshold: TimeInterval = 3 * 60
 
     public private(set) var isRunning = false
-    /// Set when window titles are wanted but Accessibility hasn't been granted.
-    public private(set) var wantsAccessibility = false
 
     /// When the recorder last knew the machine was alive. Read at launch to
     /// close a span a crash left open, since a crash writes nothing.
@@ -177,11 +175,7 @@ public final class ActivityRecorder {
     /// If the permission isn't granted this returns nil and the timeline simply
     /// shows the app without a subtitle.
     private func focusedWindowTitle(of pid: pid_t) -> String? {
-        guard AXIsProcessTrusted() else {
-            wantsAccessibility = true
-            return nil
-        }
-        wantsAccessibility = false
+        guard AXIsProcessTrusted() else { return nil }
 
         let element = AXUIElementCreateApplication(pid)
         var windowRef: CFTypeRef?
