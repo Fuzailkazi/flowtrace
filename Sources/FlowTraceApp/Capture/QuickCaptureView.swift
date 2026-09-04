@@ -18,6 +18,13 @@ struct QuickCaptureView: View {
     @State private var suggestion: CaptureSuggestion?
     @State private var note = ""
     @State private var saved = false
+    @State private var plan: CapturePlan?
+    /// What the field was pre-filled with, if anything. A note may only be
+    /// overwritten if the user actually saw it.
+    @State private var shownNote: String?
+    @State private var enrichmentFinished = false
+    @State private var saving = false
+    @State private var saveError: String?
     @FocusState private var focused: Bool
 
     init(model: AppModel, snapshot: FrontmostSnapshot, onFinish: @escaping () -> Void) {
@@ -80,7 +87,7 @@ struct QuickCaptureView: View {
                     Text("·").foregroundStyle(Journal.ruleFirm)
                     Text("\(resolved.openTabCount) tabs open")
                 }
-                if let current, current.isOpen {
+                if let current, current.isOpen, isAnnotatingOpenSpan {
                     Text("·").foregroundStyle(Journal.ruleFirm)
                     Text(current.durationLabel)
                 }
@@ -288,22 +295,55 @@ struct QuickCaptureView: View {
         focused = true
         current = try? model.store.openActivity()
         leadingUp = (try? model.store.activityLeadingUp(to: Date())) ?? []
-        note = current?.note ?? ""
+        refreshPlan()
+        // For a terminal or an editor this is the final answer, so the field is
+        // filled before the panel draws rather than a beat later.
+        if let prefill = CaptureTargeting.prefill(
+            open: current, site: resolved.site, recording: model.recorder.isRunning
+        ) {
+            note = prefill
+            shownNote = prefill
+        }
         recomputeSuggestion(tabNote: nil)
 
-        // Enrich with the browser tab a moment later, so the panel appears at once.
+        // The tab is read in two steps. Which tab you are on decides where the
+        // note lands, so it is published the moment it is known; how many other
+        // tabs are open is decoration, and walking the window for it is the
+        // slow half.
         let snapshot = self.snapshot
         Task.detached(priority: .userInitiated) {
-            let enriched = snapshot.resolvingBrowserTab()
+            let identified = snapshot.resolvingActiveTab()
             await MainActor.run {
-                if enriched != snapshot {
-                    resolved = enriched
-                    if let url = enriched.url {
-                        recomputeSuggestion(tabNote: (try? model.store.noteForTab(url: url)) ?? nil)
-                    }
+                if identified != snapshot { resolved = identified }
+                refreshPlan()
+                if note.isEmpty, let prefill = CaptureTargeting.prefill(
+                    open: current, site: resolved.site, recording: model.recorder.isRunning
+                ) {
+                    note = prefill
+                    shownNote = prefill
                 }
+                if let url = identified.url {
+                    recomputeSuggestion(tabNote: (try? model.store.noteForTab(url: url)) ?? nil)
+                }
+                // Everything the note's destination depends on is now known.
+                enrichmentFinished = true
             }
+
+            let counted = identified.resolvingTabCount()
+            await MainActor.run { if counted != identified { resolved = counted } }
         }
+    }
+
+    private func refreshPlan() {
+        plan = CaptureTargeting.plan(
+            open: current, site: resolved.site,
+            recording: model.recorder.isRunning, now: Date()
+        )
+    }
+
+    private var isAnnotatingOpenSpan: Bool {
+        if case .annotateOpen = plan { return true }
+        return false
     }
 
     private func save() {
