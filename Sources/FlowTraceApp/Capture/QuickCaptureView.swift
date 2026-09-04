@@ -438,15 +438,32 @@ struct QuickCaptureView: View {
         guard CaptureTargeting.mayOverwrite(existing: target.note, shown: shownNote) else {
             // Words the panel never showed. Keep both: yours goes down beside
             // them rather than over them.
-            try model.store.recordActivity(ActivityEvent(
-                kind: resolved.url != nil ? .browserTab : .app,
-                startedAt: now, endedAt: now,
-                appName: resolved.appName, bundleIdentifier: resolved.bundleIdentifier,
-                target: resolved.pageTitle, url: resolved.url,
-                note: text, noteAt: now
-            ))
+            try recordPoint(text, at: now)
             return
         }
-        _ = try model.store.annotate(activityId: target.id, note: text)
+
+        // A nil return means the row is no longer there to write on. The target
+        // can be deleted from under us while this panel floats over the app —
+        // Settings can forget a day, erase what was recorded automatically, or
+        // delete everything, and ambient rows are pruned in the background. That
+        // is not an error `annotate` throws for, so without this the panel would
+        // confirm "Written down." over a note that went nowhere. A note is never
+        // worth less than the row it was going to hang on.
+        if try model.store.annotate(activityId: target.id, note: text) == nil {
+            try recordPoint(text, at: now)
+        }
+    }
+
+    /// Your words as an entry in their own right — the one place a rescue point
+    /// is written, for when there is no row left to hang them on or none it
+    /// would be safe to overwrite.
+    private func recordPoint(_ text: String, at now: Date) throws {
+        try model.store.recordActivity(ActivityEvent(
+            kind: resolved.url != nil ? .browserTab : .app,
+            startedAt: now, endedAt: now,
+            appName: resolved.appName, bundleIdentifier: resolved.bundleIdentifier,
+            target: resolved.pageTitle, url: resolved.url,
+            note: text, noteAt: now
+        ))
     }
 }
