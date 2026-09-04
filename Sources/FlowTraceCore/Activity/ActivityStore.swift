@@ -71,6 +71,34 @@ extension Store {
         }
     }
 
+    /// Closes spans nothing ever closed: a crash, a force-quit, or a capture
+    /// taken while the recorder was off.
+    ///
+    /// The end is a minute after the app was last seen alive, not now — a
+    /// laptop shut at 18:00 and opened at 09:00 did not spend the night in
+    /// VS Code. Without a heartbeat the span becomes a minute long, which is
+    /// the smallest honest answer.
+    ///
+    /// Runs at launch, before the recorder can extend or resume one of these.
+    /// It closes *every* open row, which is safe because only the recorder and
+    /// the capture panel ever write one — imports and tab notes write closed
+    /// rows — and that invariant is why a future importer must not write
+    /// `endedAt == nil`.
+    @discardableResult
+    public func closeStaleOpenActivity(lastSeenAt: Date?, now: Date = Date()) throws -> Int {
+        try database.writer.write { db in
+            let open = try ActivityEvent
+                .filter(ActivityEvent.Columns.endedAt == nil)
+                .fetchAll(db)
+            for var event in open {
+                let assumed = (lastSeenAt ?? event.startedAt).addingTimeInterval(60)
+                event.endedAt = max(event.startedAt, min(now, assumed))
+                try event.update(db)
+            }
+            return open.count
+        }
+    }
+
     /// Inserts an event that already knows its own span — an agent session read
     /// from a transcript, or a git action. These don't participate in coalescing
     /// because they didn't happen "now".

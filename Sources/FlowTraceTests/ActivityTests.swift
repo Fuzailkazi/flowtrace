@@ -140,6 +140,126 @@ func runActivityTests() {
         e.endedAt = e.startedAt.addingTimeInterval(20)
         expectEqual(e.durationLabel, "under a minute")
     }
+
+    TestKit.suite("Spans left open")
+
+    // A crash, a force-quit, or the old capture bug leaves `endedAt` nil. Left
+    // alone it becomes a span stretching to now — or worse, gets resumed.
+    TestKit.test("a span left open is closed a minute after the app was last seen") {
+        let store = try store()
+        let started = Date(timeIntervalSince1970: 1_760_000_000)
+        try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: started, appName: "Code", bundleIdentifier: "com.microsoft.VSCode"
+        ))
+        let lastSeen = started.addingTimeInterval(8 * 3600)
+        let closed = try store.closeStaleOpenActivity(
+            lastSeenAt: lastSeen, now: lastSeen.addingTimeInterval(12 * 3600)
+        )
+        expectEqual(closed, 1)
+        expectNil(try store.openActivity())
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
+        expectEqual(event.endedAt, lastSeen.addingTimeInterval(60))
+    }
+
+    TestKit.test("with no heartbeat a stale span is a minute long, not a lie") {
+        let store = try store()
+        let started = Date(timeIntervalSince1970: 1_760_000_000)
+        try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: started, appName: "Code", bundleIdentifier: "com.microsoft.VSCode"
+        ))
+        _ = try store.closeStaleOpenActivity(
+            lastSeenAt: nil, now: started.addingTimeInterval(30 * 3600)
+        )
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
+        expectEqual(event.endedAt, started.addingTimeInterval(60))
+    }
+
+    TestKit.test("a span never ends before it started") {
+        let store = try store()
+        let started = Date(timeIntervalSince1970: 1_760_000_000)
+        try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: started, appName: "Code", bundleIdentifier: "com.microsoft.VSCode"
+        ))
+        _ = try store.closeStaleOpenActivity(
+            lastSeenAt: started.addingTimeInterval(-300), now: started.addingTimeInterval(3600)
+        )
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
+        expectEqual(event.endedAt, started)
+    }
+
+    TestKit.test("closed spans are left alone") {
+        let store = try store()
+        let started = Date(timeIntervalSince1970: 1_760_000_000)
+        let ended = started.addingTimeInterval(600)
+        try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: started, endedAt: ended, appName: "Code",
+            bundleIdentifier: "com.microsoft.VSCode"
+        ))
+        expectEqual(try store.closeStaleOpenActivity(lastSeenAt: Date(), now: Date()), 0)
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
+        expectEqual(event.endedAt, ended)
+    }
+
+    TestKit.suite("Notes with the recorder off")
+
+    // Two captures from two apps must be two rows. The old code overwrote the
+    // first with the second, forever, because it annotated the open span.
+    TestKit.test("two captures in two apps are two notes, and nothing stays open") {
+        let store = try store()
+        let first = Date(timeIntervalSince1970: 1_760_000_000)
+        for (app, bundle, text) in [
+            ("Safari", "com.apple.Safari", "checking the redirect"),
+            ("Code", "com.microsoft.VSCode", "fixing the save path"),
+        ] {
+            let at = app == "Safari" ? first : first.addingTimeInterval(120)
+            try store.recordActivity(ActivityEvent(
+                kind: .app, startedAt: at, endedAt: at, appName: app,
+                bundleIdentifier: bundle, note: text, noteAt: at
+            ))
+        }
+        let written = try store.activity(on: first)
+        expectEqual(written.count, 2)
+        expectNil(try store.openActivity())
+    }
+
+    TestKit.suite("Coming back to a page you wrote about")
+
+    // `save()` depends on this: the resume branch hands back the *old* span,
+    // note included, so the caller must not blindly annotate it.
+    TestKit.test("returning to a noted page resumes it with the note intact") {
+        let store = try store()
+        let start = Date(timeIntervalSince1970: 1_760_000_000)
+        func tab(_ url: String, _ title: String, at: Date) -> ActivityEvent {
+            ActivityEvent(
+                kind: .browserTab, startedAt: at, appName: "Safari",
+                bundleIdentifier: "com.apple.Safari", target: title, url: url
+            )
+        }
+        let a = try store.beginActivity(tab("https://a.example", "A", at: start))
+        _ = try store.annotate(activityId: a.id, note: "why I opened A")
+        _ = try store.beginActivity(tab("https://b.example", "B", at: start.addingTimeInterval(60)))
+        let resumed = try store.beginActivity(tab("https://a.example", "A", at: start.addingTimeInterval(120)))
+        expectEqual(resumed.id, a.id)
+        expectEqual(resumed.note, "why I opened A")
+    }
+
+    TestKit.test("a new page closes the span that was open") {
+        let store = try store()
+        let start = Date(timeIntervalSince1970: 1_760_000_000)
+        let a = try store.beginActivity(ActivityEvent(
+            kind: .browserTab, startedAt: start, appName: "Safari",
+            bundleIdentifier: "com.apple.Safari", target: "A", url: "https://a.example"
+        ))
+        let switched = start.addingTimeInterval(45)
+        _ = try store.beginActivity(ActivityEvent(
+            kind: .browserTab, startedAt: switched, appName: "Safari",
+            bundleIdentifier: "com.apple.Safari", target: "B", url: "https://b.example"
+        ))
+        let closed = try unwrap(
+            try store.allActivity(on: start, minimumSeconds: 0).first { $0.id == a.id }
+        )
+        expectEqual(closed.endedAt, switched)
+    }
 }
 
 func runSessionImportTests() {
