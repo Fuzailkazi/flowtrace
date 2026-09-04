@@ -229,15 +229,16 @@ Run: `Scripts/test.sh` → build FAILS, no `EditorPlace`.
 
 - [ ] **Step 3: Implement**
 
-Create `Sources/FlowTraceCore/Live/EditorPlace.swift` following the spec's §1 exactly. Notes that matter:
+Create `Sources/FlowTraceCore/Live/EditorPlace.swift` following the spec's §1. Notes that matter:
 
 - `lastActiveFolder` must check `URL(string:)?.scheme == "file"` before taking `.path`. Percent-decoding comes free from `URL.path`; verify with the fixture.
 - `place(…)` order: family → file mtime within `staleness` → parse → `git.topLevel(of:)` → else `FilePathCanon.canonical(folder)` → existence check → `SessionImporter.folderLabel`.
-- Foundation only. No AppKit, no `Shell`, no process inspection.
+- **Declare `public static let defaultSupport: URL`** (`~/Library/Application Support`) and make `place(…)`'s `support:` parameter default to it, rather than inlining the expression as the spec's snippet does. Task 3 needs to name that path when it stats the file, and the path must be defined once.
+- No AppKit and no process inspection of its own — but note `GitProbe.topLevel` does fork `git rev-parse`, so this is a file read *plus* one subprocess, not the "~1 ms" the spec's cost note implies. Fine on a detached task.
 
 - [ ] **Step 4: Tests pass**
 
-Run: `Scripts/test.sh` → **175 passed** (161 + 14). If a count differs, report the actual number rather than adjusting a test to match.
+Run: `Scripts/test.sh` → **172 passed** (161 + the 11 tests in this task). If a count differs, report the actual number rather than adjusting a test to match.
 
 - [ ] **Step 5: Commit**
 
@@ -255,7 +256,7 @@ git commit -m "Ask the editor which window is in front"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add at the end of `runActivityTests()` (inside it, before its closing brace, so the nested `store()` helper is in scope):
+Add at the end of `runActivityTests()` — **inside it, before its closing brace at line 263**, so the nested `store()` helper is in scope. Do not append to the end of the file: `ActivityTests.swift` holds six suite functions and a *second* `func store()` inside `runWrittenOnlyTests()`, and appending at the tail lands in the wrong one.
 
 ```swift
     TestKit.suite("Describing what a row is")
@@ -326,7 +327,7 @@ In `ActivityStore.swift`, after the existing `describeActivity(id:target:url:)` 
 
 - [ ] **Step 3: Tests pass, then commit**
 
-Run: `Scripts/test.sh` → **178 passed**.
+Run: `Scripts/test.sh` → **175 passed** (172 + these 3).
 
 ```bash
 git add Sources/FlowTraceCore/Activity/ActivityStore.swift Sources/FlowTraceTests/ActivityTests.swift
@@ -490,9 +491,27 @@ In `plan`, build the back-fill for the `annotateOpen` cases. `plan` needs to kno
     public var isEditor: Bool
 ```
 
-so the back-fill is `site.placeName.map { .set(name: $0, root: site.placeRoot ?? $0) } ?? (site.isEditor ? .clear : .unchanged)`. Put that in one private helper and use it for every `annotateOpen` return.
+The rule has exactly one definition, as a **public computed property on `CaptureSite`** — not a private helper in `CaptureTargeting`, because the App layer needs the same value for the `.beginSpan` and `recordPoint` paths and would otherwise duplicate it:
+
+```swift
+    /// What this capture knows about the place. `.clear` only for an editor
+    /// that gave no answer — for anything else the row's place is none of
+    /// this capture's business.
+    public var placeBackfill: PlaceBackfill {
+        if let name = placeName { return .set(name: name, root: placeRoot ?? name) }
+        return isEditor ? .clear : .unchanged
+    }
+```
+
+`plan` uses `site.placeBackfill` for every `annotateOpen` return; `write` uses `resolved.site.placeBackfill`.
 
 `FrontmostSnapshot.site` sets `isEditor: EditorFamily.matching(bundleIdentifier: bundleIdentifier) != nil`.
+
+**Adding a fourth associated value to `annotateOpen` is a compile break at three sites the rest of this plan does not touch.** A bare `if case .annotateOpen = plan` is fine; a 3-element pattern is a hard error. Fix all three:
+
+- `CaptureTargeting.swift:90`, inside `prefill` → `guard case .annotateOpen(let event, _, _, _) = plan(`
+- `CaptureTargetingTests.swift:91` → `guard case .annotateOpen(_, let url, let title, _)`
+- `CaptureTargetingTests.swift:106` → `guard case .annotateOpen(let event, let url, let title, _)`
 
 - [ ] **Step 2: Apply it on all three write paths**
 
@@ -500,7 +519,9 @@ In `QuickCaptureView.write(_:)` (line 417):
 
 - `.recordPoint(var event)` — already carries the metadata from "site as event". No change.
 - `.annotateOpen(let open, let url, let title, let place)` — pass `place` through to `annotate`.
-- `.beginSpan(let event)` — `beginActivity` may **discard the event** and return a pre-existing row: the coalesce (`if open.describesSameActivity(as: event) { return open }`) and the five-minute resume both do. So the place must be applied to the row it returns, not merely built into the event. Pass `.set(…)`/`.clear` derived from `resolved` the same way.
+- `.beginSpan(let event)` — `beginActivity` may **discard the event** and return a pre-existing row: the coalesce (`if open.describesSameActivity(as: event) { return open }`) and the five-minute resume both do. So the place must be applied to the row it returns, not merely built into the event. Pass `resolved.site.placeBackfill`.
+
+`annotate`'s signature becomes `annotate(_ target: ActivityEvent, with text: String, at now: Date, backfill: (url: String?, title: String?), place: PlaceBackfill)`. `recordPoint(_:at:)` builds its `metadata` from `resolved.site` the way "site as event" does — `place` and `cwd` only; `tabsOpen` is a browser concern and that path is not one.
 
 In `annotate(_:with:at:backfill:)` (line 445), apply the place **on the same path and under the same rule as the existing back-fill** — only when the note is actually landing on this row, never when it has been diverted to a rescue point:
 
@@ -540,13 +561,16 @@ In `TimelineRow.swift` (line 54), the row shows `event.target`. Show the place w
 
 - [ ] **Step 5: Build and test**
 
-Run: `swift build` → clean. Run: `Scripts/test.sh` → **178 passed**, unchanged (Core rules changed shape but not behaviour; if a `CaptureTargetingTests` case fails, the new fields' defaults are wrong — fix the defaults, not the test).
+Run: `swift build` → clean. Run: `Scripts/test.sh` → **175 passed**, unchanged — the `CaptureTargetingTests` edits in Step 1 are compile-only. `CaptureSite`'s new fields have defaults, so that file's `site(…)` helper keeps working; what breaks is `CapturePlan`'s arity, and the fix is the fourth `_` in those two patterns, not a defaults change.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/FlowTraceCore/Capture/CaptureTargeting.swift Sources/FlowTraceApp/Capture/ \
-        Sources/FlowTraceApp/Timeline/TimelineRow.swift Sources/FlowTraceCore/Activity/ActivityRecorder.swift
+git add Sources/FlowTraceCore/Live/EditorPlace.swift \
+        Sources/FlowTraceCore/Capture/CaptureTargeting.swift \
+        Sources/FlowTraceApp/Capture/ Sources/FlowTraceApp/Timeline/TimelineRow.swift \
+        Sources/FlowTraceCore/Activity/ActivityRecorder.swift \
+        Sources/FlowTraceTests/CaptureTargetingTests.swift
 git commit -m "Carry the place onto the note, and out of target's way"
 ```
 
