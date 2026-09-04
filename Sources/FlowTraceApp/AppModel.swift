@@ -129,14 +129,35 @@ final class AppModel {
         return made
     }
 
+    /// Not observed, and once per process: the span repair below is a launch-time
+    /// repair, not something to redo whenever a view appears.
+    @ObservationIgnored private var hasRepairedOpenSpans = false
+
     func startRecordingIfEnabled() {
         // Before anything can extend or resume them: close spans that a crash,
         // a quit, or a capture taken with the recorder off left open.
-        let lastSeenAt = UserDefaults.standard.object(
-            forKey: ActivityRecorder.lastSeenAtKey
-        ) as? Date
-        if let closed = try? store.closeStaleOpenActivity(lastSeenAt: lastSeenAt), closed > 0 {
-            Diagnostics.log("activity: closed \(closed) span(s) left open")
+        //
+        // Only once, though. This runs from `RootView`'s `.task`, and that window
+        // is the one users are told to close and reopen from the dock. On a
+        // re-fire the open span is *live* with a fresh heartbeat, so the repair
+        // would end it at the moment the window opened — and the recorder's next
+        // tick, finding nothing open, would start a second row for the same
+        // thing instead of continuing the span. Everything below is safe to
+        // repeat: `start()` guards on `isRunning`, and import and prune are
+        // idempotent.
+        if !hasRepairedOpenSpans {
+            hasRepairedOpenSpans = true
+            let lastSeenAt = UserDefaults.standard.object(
+                forKey: ActivityRecorder.lastSeenAtKey
+            ) as? Date
+            do {
+                let closed = try store.closeStaleOpenActivity(lastSeenAt: lastSeenAt)
+                if closed > 0 { Diagnostics.log("activity: closed \(closed) span(s) left open") }
+            } catch {
+                // The one job of this call is repairing corruption, so a failure
+                // is worth more than a launch that looks clean.
+                Diagnostics.log("activity: closing spans left open failed: \(error)")
+            }
         }
 
         if isRecording { recorder.start() }

@@ -139,6 +139,12 @@ struct QuickCaptureView: View {
                     return .handled
                 }
                 .onChange(of: note) { _, _ in saveError = nil }
+                // `text` is captured before the save waits for the tab, so a
+                // field still live through that wait would swallow anything
+                // typed after Return and confirm the older sentence. `saving` is
+                // set in the same main-actor turn as the keypress, so the field
+                // goes inert with no window to type into.
+                .disabled(saving)
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(Journal.paper, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -401,7 +407,9 @@ struct QuickCaptureView: View {
     private func waitForTab() async {
         guard !enrichmentFinished else { return }
         let deadline = ContinuousClock.now + .seconds(1.5)
-        while !enrichmentFinished, ContinuousClock.now < deadline {
+        // The sleep is `try?`, so without the cancellation check a cancelled task
+        // would spin the main actor for the full 1.5s instead of sleeping.
+        while !enrichmentFinished, !Task.isCancelled, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(20))
         }
     }
@@ -417,29 +425,45 @@ struct QuickCaptureView: View {
             try model.store.recordActivity(event)
 
         case .annotateOpen(let open, let url, let title):
-            if url != nil || title != nil {
-                try model.store.describeActivity(id: open.id, target: title, url: url)
-            }
-            try annotate(open, with: text, at: now)
+            try annotate(open, with: text, at: now, backfill: (url: url, title: title))
 
         case .beginSpan(let event):
             // Coalescing may hand back a span you noted earlier and have not
             // seen in this panel — `annotate` would replace those words.
             let target = try model.store.beginActivity(event)
-            try annotate(target, with: text, at: now)
+            try annotate(target, with: text, at: now, backfill: (url: nil, title: nil))
         }
     }
 
-    private func annotate(_ target: ActivityEvent, with text: String, at now: Date) throws {
+    /// Writes `text` onto `target`, or beside it when that would overwrite words
+    /// the panel never showed.
+    ///
+    /// The back-fill is applied here rather than by the caller because it must
+    /// only touch a row this note actually lands on. Re-titling a row whose note
+    /// we then diverted would attribute someone's existing sentence to whatever
+    /// page happens to be in front now.
+    private func annotate(
+        _ target: ActivityEvent, with text: String, at now: Date,
+        backfill: (url: String?, title: String?)
+    ) throws {
         // Already said, nothing to do — accepting a suggestion sourced from this
-        // very page arrives here.
+        // very page arrives here. No back-fill either: the row already carries
+        // this note, so re-labelling it runs the same risk.
         if target.note == text { return }
 
         guard CaptureTargeting.mayOverwrite(existing: target.note, shown: shownNote) else {
             // Words the panel never showed. Keep both: yours goes down beside
-            // them rather than over them.
+            // them rather than over them — and the row keeps its own title.
             try recordPoint(text, at: now)
             return
+        }
+
+        // Committed to writing on this row now, so it is safe to say what it is:
+        // the span may have been opened before the tab could be read.
+        if backfill.url != nil || backfill.title != nil {
+            try model.store.describeActivity(
+                id: target.id, target: backfill.title, url: backfill.url
+            )
         }
 
         // A nil return means the row is no longer there to write on. The target
