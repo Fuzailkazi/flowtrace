@@ -1,0 +1,25 @@
+{
+  "windowsState": {
+    "lastActiveWindow": {
+      "folder": "file:///Users/dev/acme",
+      "backupPath": "/x",
+      "uiState": {
+        "mode": 1
+      }
+    },
+    "openedWindows": [
+      {
+        "folder": "file:///Users/dev/other",
+        "uiState": {
+          "mode": 1
+        }
+      },
+      {
+        "folder": "file:///Users/dev/my%20project",
+        "uiState": {
+          "mode": 1
+        }
+      }
+    ]
+  }
+}

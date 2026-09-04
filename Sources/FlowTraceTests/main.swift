@@ -6,6 +6,7 @@ import FlowTraceCore
 let fixtures = Bundle.module.resourceURL!.appendingPathComponent("Fixtures")
 
 runAdapterTests(fixtures: fixtures)
+runEditorPlaceTests(fixtures: fixtures)
 runStoreTests()
 runSearchTests()
 runDetectorTests()
