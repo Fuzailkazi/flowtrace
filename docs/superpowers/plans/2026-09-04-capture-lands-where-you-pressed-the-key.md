@@ -421,7 +421,9 @@ git commit -m "Decide where a captured note lands, in one testable place"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (match the file's existing store-setup helper — it builds a `Store` on an in-memory or temp database; reuse it exactly rather than inventing a new one):
+Add these suites **at the end of `runActivityTests()`** in `Sources/FlowTraceTests/ActivityTests.swift` — inside that function, because the store helper it uses is a nested `func store() throws -> Store { try Store(database: FlowTraceDatabase.inMemory()) }` declared at the top of it (the file declares the same helper again inside a later top-level function, so placement is what puts it in scope).
+
+Two things about `allActivity(on:)` that these tests have to respect: it defaults to `minimumSeconds: 20` and drops shorter *unexplained* `.app` rows, so every assertion below passes `minimumSeconds: 0` explicitly — a zero-length span with no note would otherwise vanish and the `unwrap` would throw. Rows carrying a note are kept regardless of length, which is why the noted-point suite does not need it.
 
 ```swift
     TestKit.suite("Spans left open")
@@ -429,7 +431,7 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
     // A crash, a force-quit, or the old capture bug leaves `endedAt` nil. Left
     // alone it becomes a span stretching to now — or worse, gets resumed.
     TestKit.test("a span left open is closed a minute after the app was last seen") {
-        let store = try makeStore()
+        let store = try store()
         let started = Date(timeIntervalSince1970: 1_760_000_000)
         try store.recordActivity(ActivityEvent(
             kind: .app, startedAt: started, appName: "Code", bundleIdentifier: "com.microsoft.VSCode"
@@ -440,12 +442,12 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
         )
         expectEqual(closed, 1)
         expectNil(try store.openActivity())
-        let event = try unwrap(try store.allActivity(on: started).first)
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
         expectEqual(event.endedAt, lastSeen.addingTimeInterval(60))
     }
 
     TestKit.test("with no heartbeat a stale span is a minute long, not a lie") {
-        let store = try makeStore()
+        let store = try store()
         let started = Date(timeIntervalSince1970: 1_760_000_000)
         try store.recordActivity(ActivityEvent(
             kind: .app, startedAt: started, appName: "Code", bundleIdentifier: "com.microsoft.VSCode"
@@ -453,12 +455,12 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
         _ = try store.closeStaleOpenActivity(
             lastSeenAt: nil, now: started.addingTimeInterval(30 * 3600)
         )
-        let event = try unwrap(try store.allActivity(on: started).first)
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
         expectEqual(event.endedAt, started.addingTimeInterval(60))
     }
 
     TestKit.test("a span never ends before it started") {
-        let store = try makeStore()
+        let store = try store()
         let started = Date(timeIntervalSince1970: 1_760_000_000)
         try store.recordActivity(ActivityEvent(
             kind: .app, startedAt: started, appName: "Code", bundleIdentifier: "com.microsoft.VSCode"
@@ -466,12 +468,12 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
         _ = try store.closeStaleOpenActivity(
             lastSeenAt: started.addingTimeInterval(-300), now: started.addingTimeInterval(3600)
         )
-        let event = try unwrap(try store.allActivity(on: started).first)
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
         expectEqual(event.endedAt, started)
     }
 
     TestKit.test("closed spans are left alone") {
-        let store = try makeStore()
+        let store = try store()
         let started = Date(timeIntervalSince1970: 1_760_000_000)
         let ended = started.addingTimeInterval(600)
         try store.recordActivity(ActivityEvent(
@@ -479,7 +481,7 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
             bundleIdentifier: "com.microsoft.VSCode"
         ))
         expectEqual(try store.closeStaleOpenActivity(lastSeenAt: Date(), now: Date()), 0)
-        let event = try unwrap(try store.allActivity(on: started).first)
+        let event = try unwrap(try store.allActivity(on: started, minimumSeconds: 0).first)
         expectEqual(event.endedAt, ended)
     }
 
@@ -488,7 +490,7 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
     // Two captures from two apps must be two rows. The old code overwrote the
     // first with the second, forever, because it annotated the open span.
     TestKit.test("two captures in two apps are two notes, and nothing stays open") {
-        let store = try makeStore()
+        let store = try store()
         let first = Date(timeIntervalSince1970: 1_760_000_000)
         for (app, bundle, text) in [
             ("Safari", "com.apple.Safari", "checking the redirect"),
@@ -510,7 +512,7 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
     // `save()` depends on this: the resume branch hands back the *old* span,
     // note included, so the caller must not blindly annotate it.
     TestKit.test("returning to a noted page resumes it with the note intact") {
-        let store = try makeStore()
+        let store = try store()
         let start = Date(timeIntervalSince1970: 1_760_000_000)
         func tab(_ url: String, _ title: String, at: Date) -> ActivityEvent {
             ActivityEvent(
@@ -527,7 +529,7 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
     }
 
     TestKit.test("a new page closes the span that was open") {
-        let store = try makeStore()
+        let store = try store()
         let start = Date(timeIntervalSince1970: 1_760_000_000)
         let a = try store.beginActivity(ActivityEvent(
             kind: .browserTab, startedAt: start, appName: "Safari",
@@ -538,7 +540,9 @@ Add to `runActivityTests()` in `Sources/FlowTraceTests/ActivityTests.swift` (mat
             kind: .browserTab, startedAt: switched, appName: "Safari",
             bundleIdentifier: "com.apple.Safari", target: "B", url: "https://b.example"
         ))
-        let closed = try unwrap(try store.allActivity(on: start).first { $0.id == a.id })
+        let closed = try unwrap(
+            try store.allActivity(on: start, minimumSeconds: 0).first { $0.id == a.id }
+        )
         expectEqual(closed.endedAt, switched)
     }
 ```
