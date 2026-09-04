@@ -629,9 +629,13 @@ In `ActivityRecorder.swift`:
     public init(store: Store) {
         self.store = store
         #if canImport(AppKit)
+        // Every other stored property has a default, so `self` is fully formed
+        // by this line and may be captured. Weakly: the notification centre
+        // would otherwise own the recorder for the life of the process, and this
+        // token is never removed — quitting is the only thing it fires on.
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main,
-            using: { _ in MainActor.assumeIsolated { self.closeSpan() } }
+            using: { [weak self] _ in MainActor.assumeIsolated { self?.closeSpan() } }
         )
         #endif
     }
@@ -970,15 +974,13 @@ Replace `save()` (lines 309-351). It stays synchronous — `.onSubmit` and the E
         guard CaptureTargeting.mayOverwrite(existing: target.note, shown: shownNote) else {
             // Words the panel never showed. Keep both: yours goes down beside
             // them rather than over them.
-            var point = ActivityEvent(
+            try model.store.recordActivity(ActivityEvent(
                 kind: resolved.url != nil ? .browserTab : .app,
                 startedAt: now, endedAt: now,
                 appName: resolved.appName, bundleIdentifier: resolved.bundleIdentifier,
                 target: resolved.pageTitle, url: resolved.url,
                 note: text, noteAt: now
-            )
-            try model.store.recordActivity(point)
-            _ = point
+            ))
             return
         }
         _ = try model.store.annotate(activityId: target.id, note: text)
