@@ -44,6 +44,16 @@ struct QuickCaptureView: View {
         .frame(width: 520, alignment: .leading)
         .background(Journal.card)
         .onAppear(perform: load)
+        // The one measurement that settles whether keystrokes are being lost:
+        // how much text actually reached the field, and whether it was kept.
+        // A run of "0 chars" closes on apps where you know you typed is the
+        // evidence for a focus problem; anything else is not.
+        .onDisappear {
+            Diagnostics.log(
+                "capture closed over \(resolved.appName) — "
+                + "\(note.count) chars reached the field, saved: \(saved)"
+            )
+        }
     }
 
     // MARK: - Where you are

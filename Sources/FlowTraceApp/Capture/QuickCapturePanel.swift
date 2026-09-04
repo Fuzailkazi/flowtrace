@@ -108,9 +108,26 @@ final class QuickCaptureController {
                 NSApp.activate(ignoringOtherApps: true)
                 panel.makeKey()
             }
-            Diagnostics.log(
-                "panel over \(snapshot.appName) — accepts typing: \(panel.isKeyWindow)"
-            )
+            // Read again once the window server has settled. The immediate
+            // reading above is taken in the same turn as `makeKey()`, which
+            // has not taken effect yet — it reported "accepts typing: false"
+            // on panels that went on to accept typing perfectly well, and a
+            // false alarm here is expensive: it argues for re-architecting the
+            // app around a bug that may not exist.
+            //
+            // What matters is not whether the panel is key but whether the
+            // *field* has the keyboard: a key panel whose text field never
+            // became first responder swallows keystrokes just as completely.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                guard let panel = self?.panel else { return }
+                let responder = panel.firstResponder
+                let fieldHasKeyboard = responder is NSTextView
+                Diagnostics.log(
+                    "panel over \(snapshot.appName) — key: \(panel.isKeyWindow), "
+                    + "field ready: \(fieldHasKeyboard), "
+                    + "responder: \(responder.map { String(describing: type(of: $0)) } ?? "none")"
+                )
+            }
         }
     }
 
