@@ -1,12 +1,14 @@
 # A capture knows its place
 
-Sub-project **A2**, taken out of order at the author's request after hitting it within minutes of real use. It implements the audit's core-loop finding "non-browser captures record only app name" and the editor/terminal half of Tier 1.3 (`docs/superpowers/audits/2026-09-03-product-audit-and-launch-roadmap.md`). It builds on **A — capture lands where you pressed the key** (merged), and pushes B (consent), C (redaction), D (first run) and E (launch wrapper) back one slot.
+Sub-project **A2**, taken out of order after the author hit it within minutes of real use. It implements the audit's core-loop finding "non-browser captures record only app name" and the editor half of Tier 1.3 (`docs/superpowers/audits/2026-09-03-product-audit-and-launch-roadmap.md`). It builds on **A — capture lands where you pressed the key** (merged), and pushes B (consent), C (redaction), D (first run) and E (launch wrapper) back one slot.
 
-Revised after review. Three things changed materially: the ranking now reads the terminal's **atime** rather than its mtime, because mtime measures output and not you; the place is stored in **metadata only, never `target`**, because a `target` the recorder cannot reproduce splits its spans within 30 seconds; and the whole window-title/Accessibility section is gone — that row already exists in Settings, and I was wrong to call it a defect.
+**Third revision, and a different design.** Two earlier drafts resolved the project by inspecting processes and ranking terminals by recency. Review destroyed both rankings with measurements from the author's own machine: tty **mtime** tracks output, so a streaming agent pinned one project to first place permanently; tty **atime** tracks *any* read, and an interactive TUI queries the terminal constantly — over three minutes with nobody typing, exactly the three ttys running a Claude session advanced their atime, and the ranking would have answered `devx` while the author worked in `flowtrace`. Both drafts were elaborate machinery around a signal that does not mean what it claims.
+
+The answer was sitting in a file the editor writes itself. This revision reads that, and does nothing else.
 
 ## Problem
 
-Press the capture shortcut in VS Code or a terminal and the panel says **`Code`**. Not which project, not which file — just the app. The note that lands says the same, so a week later the timeline reads "Code" with a sentence under it and no way to tell which of eight projects it was about.
+Press the capture shortcut in VS Code and the panel says **`Code`**. Not which project, not which file — just the app. The note that lands says the same, so a week later the timeline reads "Code" with a sentence under it and no way to tell which of five open projects it was about.
 
 Measured on the author's live database:
 
@@ -16,214 +18,168 @@ Measured on the author's live database:
 | `browserTab` | 919 | 0 | **919** |
 | `agentSession` | 36 | 0 | 0 |
 
-So the browser half of the request is already done — every browser row carries the browser name, the page title *and* the link (`Brave Browser · Fuzail Kazi | LinkedIn · https://linkedin.com/in/fuzail-kazi/`). The app half has never once worked, for two reasons:
+The browser half of the request is already done — every browser row carries the browser name, the page title *and* the link (`Brave Browser · Fuzail Kazi | LinkedIn · https://linkedin.com/in/fuzail-kazi/`). The app half has never once worked, for two reasons:
 
-1. **The panel never asks.** `FrontmostSnapshot.capture()` collects `localizedName` and `bundleIdentifier` and nothing else — no window title, no project, and no pid. Nothing in `Sources/FlowTraceApp/Capture/` reads `LiveState` or Accessibility. So the header says `Code` regardless of any permission.
-2. **The recorder's title read returns nothing.** `ActivityRecorder.captureFrontmost` does attempt layer 2 (`captureWindowTitles` defaults true and nothing sets it false), so 557 empty targets mean `AXIsProcessTrusted()` is false: Accessibility is not granted on this machine.
+1. **The panel never asks.** `FrontmostSnapshot.capture()` collects `localizedName` and `bundleIdentifier` and nothing else. Nothing in `Sources/FlowTraceApp/Capture/` reads any further source. So the header says `Code` regardless of any permission.
+2. **The recorder's window-title read returns nothing.** `ActivityRecorder.captureFrontmost` does attempt it (`captureWindowTitles` defaults true and nothing sets it false), so 557 empty targets mean `AXIsProcessTrusted()` is false: Accessibility is not granted here.
 
-The app does *not* hide that second fact — `SettingsView.recordingSection` already shows "Without Accessibility, entries show the app only" with a **Grant…** button whenever recording is on and the permission is missing. An earlier draft of this spec called that a third defect; it was wrong. The only residue is that `ActivityRecorder.wantsAccessibility` has no reader at all, the Settings row being driven by `AccessibilityPermission.isGranted` instead — which is better, since a flag that only becomes true *after* a failed read would not appear until the damage was done. Delete the dead property.
+The app does *not* hide that second fact — `SettingsView.recordingSection` already shows "Without Accessibility, entries show the app only" with a **Grant…** button. An earlier draft called that a third defect; it was wrong. The only residue is that `ActivityRecorder.wantsAccessibility` has no reader anywhere, the Settings row being driven by `AccessibilityPermission.isGranted` instead — which is better, since a flag that turns true only *after* a failed read would appear too late to help. Delete the dead property.
 
 ## Approach
 
-**A capture lands on a place, not on an app.** "Place" is already FlowTrace's unit — `LiveProject` groups agents and servers by repository root precisely because an agent in `tulu` and a server started in `tulu/frontend` are one thing. A note taken in VS Code should join that same place, so the day reads `Code · flowtrace — "fixing the save path"` and the note sits alongside the agents and ports already grouped under `flowtrace`.
+**Ask the editor which window you are in, because it already wrote the answer down.**
 
-The place is resolved by **process inspection plus terminal input recency** — the same permission-free machinery `LiveStateReader` already uses for agents (`ps`/`lsof`/`git rev-parse`), no Accessibility, no Automation, nothing new to grant. Every claim below was measured on the author's machine before being designed, and re-measured by review.
-
-**What the probes found.**
-
-VS Code's own processes are useless: every helper reports cwd `/`. But its integrated terminals are reachable — the chain is `Electron (the app pid) → Code Helper → zsh → cwd`, and those shells sit in real projects. The catch is that one VS Code app held **eight** distinct project cwds across twenty-five shells, so the process tree yields a *set* of candidates, not an answer. `Terminal.app` is worse: nothing descends from its pid at all, its shells having been re-parented to launchd (on this machine via `tmux`; `login` is the usual mechanism but no `login` process was present).
-
-The disambiguator is the tty device's timestamp — but **which** timestamp is the whole design, and the obvious choice is wrong:
-
-- **mtime is output.** It advanced 4.5 seconds on `ttys010` with nobody touching the keyboard, because a streaming agent was printing there. On a machine built for running many agents, mtime would pin whichever project has a live agent to first place forever. Worse, a single system wake touched seven ttys within 0.5 seconds of each other, flattening the ranking into a meaningless tie.
-- **atime is input.** A tty's access time advances when something *reads* from it, which is your keystrokes. It separates exactly the cases mtime confuses, and it does not drift: over four seconds with no typing, atime did not move on any tty.
+VS Code maintains `~/Library/Application Support/Code/User/globalStorage/storage.json`, and inside it:
 
 ```
-tty        mtime_idle  atime_idle   cwd
-ttys039            6s          6s   venture/flowtrace        ← where the author actually is
-ttys010            0s         85s   venture/flowtrace        ← agent streaming, nobody typing
-ttys040           48s       3608s   venture/flowtrace        ← printed recently, left an hour ago
-ttys021         4718s      59318s   iq/adk           ┐
-ttys008         4718s      60464s   projects/hyperframe ├ mtime ties from one system wake;
-ttys022         4718s      67651s   iq/devx          ┘ atime separates them correctly
+windowsState.lastActiveWindow.folder  → file:///Users/fu2ail/venture/flowtrace
+windowsState.openedWindows[].folder   → iq/adk, hyperframe, armor/videos, iq/devx, venture/flowtrace
 ```
 
-`ps -eo pid,ppid,tty,comm` costs ~77ms over 778 processes; the full probe — `ps` + one batched `lsof` + one `git rev-parse` — measured **~113ms**.
+Verified on the author's machine, written 83 seconds before it was read, and correct — `venture/flowtrace` was the focused window while five projects were open. Cursor keeps the same file under its own support directory (it is a VS Code fork); Windsurf, VSCodium and Insiders would too if installed.
+
+This is the same category of source FlowTrace is built on. The README's promise is "It reads only what your machine already wrote down", and its existing sources are exactly that: agent transcripts the agents wrote, git state, listening ports. An editor's own window-state file belongs in that list. It needs **no permission**, costs **one file read**, and — decisively — answers the question process inspection cannot: not "which projects does this app have open" but **"which window is in front"**.
+
+**Terminals are deliberately out of scope, and get their own sub-project.** A terminal has no equivalent state file, and its shells' cwds have the same window-ambiguity problem an editor's terminals do, with no honest discriminator: mtime is output, atime is TUI traffic, and both drafts that tried to rank them produced a wrong answer at the top of the list on the author's machine. `Terminal.app`'s shells are not even reachable from its pid (they are re-parented to launchd; on this machine via `tmux`). That is a real problem worth solving, but it needs its own measurement pass, and bundling it here is what made the last two drafts wrong. **A3** will take it, with the material already gathered recorded in the audit.
 
 Rejected alternatives:
-- *Accessibility window title.* The one exact answer to "which window is in front" (`main.swift — flowtrace`), already coded in the recorder — but it needs a permission the author has not granted, so it would ship and still show `Code`; extracting a project from a title means per-app format guessing; the read is synchronous IPC with a **six-second** default timeout, which cannot sit inside the panel's 1.5-second budget; and the function is `private` on a `@MainActor` class while this resolution runs off the main actor. All risk, and it buys only a nicer header line. Out of scope entirely.
-- *Match against live agents/servers.* FlowTrace already knows which repos are live, but with 17 live places that is a guess with no tie-breaker. Superseded by atime, which is the same idea with evidence attached.
-- *Reading the editor's argv for a workspace path.* Probed and absent — VS Code's helpers carry only `vscode-window-config`, and this install is App-Translocated anyway.
-
-**Silence beats a wrong answer, and the thresholds enforce it.** A wrong place is not cosmetic: it feeds Smart Capture's highest-priority suggestion source. So a candidate must be recent enough to be believable, and when nothing is, the panel says `Code` exactly as it does today.
+- *Process inspection with terminal recency.* Two drafts, both measured, both wrong at the top of the ranking. Kept out of A2 entirely.
+- *Accessibility window title.* The other exact answer (`main.swift — flowtrace`), already coded in the recorder — but it needs a permission the author has not granted, so it would ship and still show `Code`; extracting a project from a title means per-app format guessing; the read is synchronous IPC with a six-second default timeout, which cannot sit inside the panel's budget; and the function is `private` on a `@MainActor` class while enrichment runs off the main actor. All risk, and it buys a nicer header line for a case this design already covers.
+- *Match against live agents and servers.* FlowTrace knows which repos are live, but with 17 live places that is a guess with no tie-breaker.
 
 ## Design
 
-### 1. `PlaceResolver` (new, `Sources/FlowTraceCore/Live/PlaceResolver.swift`)
+### 1. `EditorPlace` (new, `Sources/FlowTraceCore/Live/EditorPlace.swift`)
 
 ```swift
-/// Where you are working, when the app in front is not a browser.
+/// The project an editor has in front, read from the editor's own state file.
 public struct Place: Sendable, Equatable {
     /// Repository root, canonical — the same key `LiveProject` and `ProjectNote` use.
     public var root: String
     /// "flowtrace" — what a person calls it. From `SessionImporter.folderLabel`,
     /// deliberately: Now already labels this place that way, and two names for
-    /// one place is worse than an imperfect name. (In a linked worktree that
-    /// means the worktree's own folder, e.g. "smart-capture".)
+    /// one place is worse than an imperfect name.
     public var name: String
-    /// The terminal it was read from. Shown only in a tooltip — a tty name
-    /// means nothing to most people, but it makes a wrong answer checkable.
-    public var tty: String?
-    /// How long since anyone last *typed* in that terminal (the tty's atime,
-    /// not its mtime: output is not presence).
-    public var idleFor: TimeInterval
-    public var source: Source
-
-    public enum Source: Sendable, Equatable {
-        /// A shell descended from the app in front.
-        case ownShell
-        /// Nothing descends from the app in front — its terminals are
-        /// re-parented (Terminal.app, tmux) — so the most recently typed-in
-        /// shell on the machine was taken instead. The weaker answer.
-        case recentShell
-    }
+    /// How long since the editor wrote the file. Surfaced because an answer
+    /// from ten seconds ago and one from two days ago deserve different trust.
+    public var writtenAgo: TimeInterval
 }
 
-/// A process as `ps` reports it.
-public struct ShellProcess: Sendable, Equatable {
-    public var pid: Int32
-    public var ppid: Int32
-    public var tty: String?
-    /// Verbatim, because `ps -eo comm` emits absolute paths containing spaces
-    /// and parentheses — "…/Code Helper (Renderer).app/…/Code Helper (Renderer)".
-    public var command: String
-    public init(pid: Int32, ppid: Int32, tty: String?, command: String)
+/// Editors that keep a readable record of their focused window.
+///
+/// All of these are VS Code or a fork of it, so one parser serves them all.
+/// Adding another is a line in this list, which is the point of keeping it
+/// data rather than code.
+public struct EditorFamily: Sendable {
+    public var bundleIdentifiers: Set<String>
+    /// Directory under ~/Library/Application Support.
+    public var supportDirectory: String
+
+    public static let all: [EditorFamily] = [
+        EditorFamily(bundleIdentifiers: ["com.microsoft.VSCode"], supportDirectory: "Code"),
+        EditorFamily(bundleIdentifiers: ["com.microsoft.VSCodeInsiders"], supportDirectory: "Code - Insiders"),
+        EditorFamily(bundleIdentifiers: ["com.todesktop.230313mzl4w4u92"], supportDirectory: "Cursor"),
+        EditorFamily(bundleIdentifiers: ["com.exafunction.windsurf"], supportDirectory: "Windsurf"),
+        EditorFamily(bundleIdentifiers: ["com.visualstudio.code.oss"], supportDirectory: "VSCodium"),
+    ]
+
+    public static func matching(bundleIdentifier: String?) -> EditorFamily?
 }
 
-public enum PlaceResolver {
-    /// How stale a terminal may be and still answer.
+public enum EditorPlace {
+    /// The freshest answer an editor is willing to give, or nil.
     ///
-    /// A descendant of the app in front is trusted for a working session: you
-    /// can read code for twenty minutes without typing in the terminal you
-    /// opened the project from. A shell that merely happens to be the most
-    /// recent on the machine gets `LiveStateReader.workingWindow` — the app's
-    /// one definition of "actively working" — because that answer is a guess
-    /// about a different app entirely.
-    public static let ownShellWindow: TimeInterval = 30 * 60
-    public static let recentShellWindow: TimeInterval = 120
-
+    /// `staleness` bounds how old the file may be. It is generous on purpose:
+    /// the file records the window you last focused, which stays true while
+    /// you are in that window — and if the editor is not in front, nothing
+    /// asks. It exists only to refuse an answer from a previous session.
     public static func place(
-        forFrontmost pid: Int32,
-        probe: ProcessProbe = SystemProcessProbe(),
+        forBundleIdentifier id: String?,
+        support: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support"),
+        staleness: TimeInterval = 7 * 24 * 3600,
         git: GitProbe = GitProbe()
     ) -> Place?
 
     // MARK: - The testable half
 
-    /// Parses `ps -eo pid,ppid,tty,comm`. Skips the header; keeps `command`
-    /// whole by splitting only the first three fields.
-    public static func parse(psOutput: String) -> [ShellProcess]
-
-    /// Every descendant of `pid`, walking the parent map. Depth-capped at 64
-    /// so a cycle in a malformed table cannot hang the panel.
-    public static func descendants(of pid: Int32, in processes: [ShellProcess]) -> Set<Int32>
-
-    /// Processes worth asking for a working directory: a shell with a tty.
-    /// Matched on the last path component with any leading `-` stripped, so
-    /// `-zsh`, `/bin/zsh` and `/opt/homebrew/bin/zsh` all count. Known shells:
-    /// `zsh`, `bash`, `fish`, `sh`, `dash`, `ksh`, `tcsh`, `csh`, `nu`.
-    public static func shells(in processes: [ShellProcess]) -> [ShellProcess]
-
-    /// Picks one candidate, or none. Tier first, then input recency, then the
-    /// staleness thresholds — see §2.
-    public static func rank(
-        candidates: [ShellProcess], descendants: Set<Int32>,
-        idleForTTY: [String: TimeInterval], rootForPID: [Int32: String]
-    ) -> (shell: ShellProcess, source: Place.Source)?
-}
-
-/// The three system reads, behind a seam so the composition is testable.
-public protocol ProcessProbe: Sendable {
-    /// `ps -eo pid,ppid,tty,comm`
-    func processTable() -> String
-    /// Batched `lsof -a -d cwd -Fpn -p <csv>`, keyed by pid.
-    func workingDirectories(for pids: Set<Int32>) -> [Int32: String]
-    /// The tty device's atime, as seconds since it was last read from.
-    func idleForTTY(_ ttys: Set<String>) -> [String: TimeInterval]
+    /// The focused window's folder path, from the contents of a
+    /// `globalStorage/storage.json`.
+    ///
+    /// Only `windowsState.lastActiveWindow.folder` is read. `openedWindows` is
+    /// deliberately ignored: it is the set of projects open, which is the
+    /// ambiguity this design exists to avoid, not an answer.
+    public static func lastActiveFolder(inStorageJSON data: Data) -> String?
 }
 ```
 
-`SystemProcessProbe` is the real implementation. `processTable()` goes through Core's hardened `Shell.run` (stdin nulled, 5s timeout). `workingDirectories(for:)` is **not reimplemented**: the identical private method on `LiveStateReader` is promoted to `internal static` and called from both. `idleForTTY` uses the existing `FileMeta.stat` helper rather than adding a fourth stat implementation, reading **atime**; a device that cannot be stat'ed is reported as `.greatestFiniteMagnitude`.
+`place(forBundleIdentifier:)` composes: match the family; read `<support>/<dir>/User/globalStorage/storage.json`; refuse if its modification date is older than `staleness`; `lastActiveFolder`; convert the `file://` URL to a path; `git.topLevel(of:)` for the repository root, falling back to the folder itself when it is not a repository — a note about a directory beats a note about an app; `SessionImporter.folderLabel` for the name.
 
-`place(forFrontmost:)` composes: `processTable` → `parse` → `shells` → `descendants` → `workingDirectories` for the candidate pids → `idleForTTY` for their ttys → `rank` → `git.topLevel(of:)` for the winner only, then `FilePathCanon.canonical` and `SessionImporter.folderLabel`. A cwd with no git root still yields a `Place` — the folder is the place, and a note about a directory beats a note about an app.
+`lastActiveFolder` handles what the format actually does: `folder` is a percent-encoded `file://` URL and must be decoded (a path with a space arrives as `%20`); a window opened on a multi-root workspace has `workspaceIdentifier` instead of `folder` and yields nil rather than a guess; an untitled window has neither. It uses `JSONSerialization` and returns nil on anything malformed — this file is written by another program and its shape is not a contract.
 
-### 2. Ranking rules
+### 2. Where it runs
 
-In order:
-1. **Tier.** Any candidate that is a descendant of the frontmost app beats any that is not. This makes VS Code's integrated terminal authoritative over an unrelated Terminal window.
-2. **Input recency.** Within a tier, the tty with the smallest atime-idle wins.
-3. **Staleness.** The winner is discarded — and `place` returns nil — if its idle exceeds `ownShellWindow` (30 min) for a descendant, or `recentShellWindow` (120s) for a non-descendant. A stale answer is a wrong answer waiting to be believed.
-4. **Unreadable.** A candidate whose cwd cannot be read is dropped before ranking (not ranked-and-skipped), so a readable but staler sibling can still answer. A tty that cannot be stat'ed sorts last by construction and is then almost always cut by rule 3.
-5. **Nothing left → nil**, and the panel behaves exactly as today: the app's name. Silence over a bad guess.
+One file read, so it is cheap — but it is still I/O and `load()` must not block, so it joins the panel's enrichment in `QuickCaptureView.load()` as **its own detached task**, publishing into `resolved.place`. Not inside the existing tab-resolution task: that one flips `enrichmentFinished`, and putting the place before that flip would make every non-browser capture wait on A's 1.5-second bound, which today it never does.
 
-**What tier cannot do, stated plainly:** all twenty-five shells under VS Code's helper are equally descendants of the app pid, across eight projects. Rule 1 distinguishes *apps*, not *windows*. So for a multi-window editor the answer is "the project whose terminal you typed in most recently", which is usually but not always the window in front. That is why the hedge in §3 is on `idleFor`, not on `source` — `.ownShell` can be wrong too, just less often.
+**`enrichmentFinished` is not gated on the place**, and A's wait is untouched. `CaptureTargeting.plan` reads `appName`, `bundleIdentifier`, `pageTitle`, `url`, `openTabCount`, `isBrowser` and `automationDenied` — never a place. Whatever has arrived by write time is stored; if nothing has, the capture behaves exactly as today.
 
-### 3. Where it runs, and what the user sees
+Only editors are asked. A browser is never asked (a tab is a better answer than a directory); anything not in `EditorFamily.all` is never asked, and its capture is unchanged.
 
-Resolution costs three subprocesses, so it never runs on the main actor. It joins the panel's existing enrichment in `QuickCaptureView.load()`:
+`FrontmostSnapshot` gains `var place: Place?` — no pid, no process walk, nothing else. `FrontmostSnapshot.site` maps `place.name` and `place.root` into two new `CaptureSite` fields, `placeName` and `placeRoot`.
 
-- **Not a browser** (`matchedBrowser == nil`): the detached task calls `PlaceResolver.place(forFrontmost:)` and publishes the result into `resolved.place`.
-- **A browser**: not resolved at all. A tab is already a better answer than a directory.
+### 3. What the user sees
 
-**`enrichmentFinished` is not gated on the place**, and A's bounded 1.5-second wait in `save()` is untouched. An earlier draft gated it on the theory that the note's destination depends on the place; it does not — `CaptureTargeting.plan` reads `appName`, `bundleIdentifier`, `pageTitle`, `url`, `openTabCount`, `isBrowser` and `automationDenied`, and never the place. Whatever has arrived by write time is what gets stored. So a non-browser capture continues to wait for nothing, as today.
+`summary` returns `place.name` for a non-browser that resolved, so the header reads **`flowtrace`** in the slot a page title occupies for a browser. The app name is already rendered separately, so `detail` is unchanged for browsers (it keeps the URL host) and for a resolved editor it reads `VS Code's current window` — a statement about *where the answer came from*, not a claim about presence. That phrasing is deliberate: the two previous drafts wrote "typed here just now", which the data could not support. This one can, because the editor said so.
 
-`FrontmostSnapshot` gains **`var pid: pid_t?`**, set in `capture()` from `frontmostApplication.processIdentifier`. This is load-bearing: by the time the detached task runs, FlowTrace itself is frontmost, so a resolver that asked the system for the frontmost pid would walk FlowTrace's own subtree and return a plausible, wrong answer with no error.
-
-In the header, `summary` returns `place.name` for a non-browser that resolved — so the header reads **`flowtrace`** in the slot a page title occupies for a browser. The existing `detail` line already renders the app name separately, so `detail` returns only the hedge, never the app name again: `best guess from your terminals` for `.recentShell`, and for `.ownShell` a plain relative time via a `RelativeTime.label(for:)` helper extracted from `LiveAgent.lastActivityLabel` (an instance property today, so it needs lifting to a shared static rather than being referenced in place). The tty goes in `.help(…)`, not the line. The word "typed" carries the meaning: *typed here 2m ago* is checkable; "just now" would be a claim about presence the data cannot support.
+No time is shown. `writtenAgo` exists for the staleness refusal and for a tooltip, not for the line — the answer is either the editor's current window or it is nothing.
 
 ### 4. What is stored
 
-**The place goes in `metadata`, never in `target`.** `ActivityEvent.describesSameActivity` compares `target`, and with Accessibility off — the author's actual state, and the reason for the 557 — the recorder builds VS Code events with `target = nil`. A capture writing `target = "flowtrace"` would be closed and replaced by the recorder's very next tick (≤30s), leaving a truncated `Code · flowtrace` span followed by a long bare `Code`, with the noted row orphaned beyond resumption. That is worse span quality than today, and it breaks the coalescing symmetry sub-project A depends on. `metadata` is not compared, so it is free.
+**The place goes in `metadata`, never in `target`.** `ActivityEvent.describesSameActivity` compares `target`, and with Accessibility off — the author's state, and the reason for the 557 — the recorder builds VS Code events with `target = nil`. A capture writing `target = "flowtrace"` would be closed and replaced by the recorder's very next tick (≤30s), leaving a truncated noted span followed by a long bare `Code`, the noted row orphaned beyond resumption. Worse span quality than today, and it breaks the coalescing symmetry A depends on. `metadata` is not compared, so it is free.
 
-Concretely:
-- `CaptureSite` gains `placeName: String?` and `placeRoot: String?`. `CaptureTargeting`'s "site as event" sets `metadata["place"] = placeName` and `metadata["cwd"] = placeRoot`, leaving `target` alone for a non-browser.
-- **`annotateOpen` must carry the place too, or the dominant path gets nothing.** Only `beginSpan` and `recordPoint` build "site as event", and the configuration that produced all 557 rows — recording on, same app, no url — resolves to `.annotateOpen`. So `CapturePlan.annotateOpen` gains a place back-fill beside `backfillURL`/`backfillTitle`, and because `Store.describeActivity(id:target:url:)` cannot write metadata, a new store affordance is required: `Store.describeActivity(id:metadata:)` merging keys into the existing dictionary (merge, not replace — `tabsOpen`, `asked` and `messages` live there). A's `annotate(_:with:at:backfill:)` applies it on the same path and under the same rule: only when the note is actually landing on that row, never when it has been diverted to a rescue point.
-- `QuickCaptureView.recordPoint(_:at:)` — A's rescue path — builds its event from `resolved` and must carry the place as well, or a diverted note loses it.
-- The timeline row renders the place from `metadata["place"]`, falling back to `target`. This is the one carve-out from §5's exclusion of display work: without it nothing visible changes and the sub-project has no observable effect.
+- `CaptureTargeting`'s "site as event" sets `metadata["place"]` and `metadata["cwd"]` from the site, leaving `target` alone.
+- **`annotateOpen` needs the place too**, or the dominant path gets nothing: only `beginSpan` and `recordPoint` build "site as event", and the configuration that produced all 557 rows — recording on, same app, no url — resolves to `.annotateOpen`. So `CapturePlan.annotateOpen` carries a place back-fill beside `backfillURL`/`backfillTitle`. Because `Store.describeActivity(id:target:url:)` cannot write metadata, a new affordance is required: **`Store.describeActivity(id:metadata:)`**, *merging* keys rather than replacing — `tabsOpen`, `asked` and `messages` share that dictionary.
+- **`beginSpan` needs it applied to the row, not the event.** `Store.beginActivity` has two paths that discard the event entirely and return a pre-existing row: the coalesce (`if open.describesSameActivity(as: event) { return open }`) and the five-minute resume. Alt-tab to Slack and back within five minutes, capture, and the freshly resolved place is thrown away. So the back-fill is applied to whatever row `beginActivity` returns, on the same "only the row the note lands on" rule A already uses — never to a row a note was diverted from.
+- **A nil resolution clears the place.** Merging alone would leave a *previous* capture's place on the recorder's long-lived open span: capture in A, switch to B, capture again with no answer, and B's sentence sits on a row labelled `Code · A`. That is worse than today. So place and note are written together or not at all: when resolution yields nil, the back-fill removes `place` and `cwd` from the row.
+- `QuickCaptureView.recordPoint(_:at:)` — A's rescue path — must carry the place as well, or a diverted note loses it.
+- `TimelineRow` renders the place from `metadata["place"]`, but **after** `target`, not before: if Accessibility is ever granted, a specific window title is a better label than a coarser project name, and should not be hidden behind it.
+- A capture can never write to an `agentSession` row, so `upsertImportedActivity`'s wholesale `metadata` overwrite cannot destroy a captured place: `annotateOpen` only ever targets the open span, and only the recorder and the panel write open rows. `describeActivity(id:metadata:)` is new public API with no such guard, so it carries that invariant in its doc comment.
 
-Storing `cwd` has a second payoff: Smart Capture's highest-priority source is the project note for `metadata["cwd"]`, which until now appeared only on imported agent sessions. With it on captured rows, pressing the shortcut in a repo you have written a project note for suggests that note — the other half of Tier 1.3, for no extra work. This is also why the `annotateOpen` back-fill matters: `projectNoteCandidate()` reads `metadata["cwd"]` off the open span and `leadingUp`, so without it the suggestion never fires on the common path either.
+### 5. Smart Capture, wired properly
 
-### 5. Out of scope
+Storing `cwd` is meant to feed Smart Capture's highest-priority source — the project note for `metadata["cwd"]`. Two things have to be true for that, and neither is automatic:
 
-The window title and anything Accessibility-dependent (see Approach). Correcting a wrong place from inside the panel — `metadata["cwd"]` means a wrong place stays repairable later, which is the argument for deferring the picker. Resolving a place for the recorder's own ambient rows. The Now view's labelling, apart from the timeline row named in §4. Warp/WezTerm integrations. Anything in B, C, D or E.
+- **The resolved place must reach the suggestion directly.** `projectNoteCandidate()` reads `metadata["cwd"]` from the open span and `leadingUp` — i.e. from *earlier* rows — while the freshly resolved place is only written on save. So it prefers `resolved.place?.root` and falls back to row metadata, and `recomputeSuggestion` is called when the place lands (today it runs only in `load()` and the tab continuation).
+- **Otherwise a stale `cwd` hijacks it.** Today `metadata["cwd"]` appears only on closed `agentSession` rows. A2 makes the *open* VS Code span the dominant carrier, and that span outlives the project it was written in: capture in A, work in B for an hour, capture in B, and the top-priority suggestion is A's "what am I building". Preferring the live answer removes it; the fallback retains a weaker version, which is acceptable only because the fallback is now rarely reached.
 
-### 6. Decisions to confirm at review
+### 6. Out of scope
 
-1. **A wrong place is shown, hedged, and not correctable.** The copy carries the confidence rather than a false claim of presence. Confirm that is enough without a picker.
-2. **The two thresholds — 30 minutes and 120 seconds.** They are judgement calls. Too tight and the feature rarely fires; too loose and it fires wrongly. 120s reuses `LiveStateReader.workingWindow` so the app keeps one definition of "actively working".
+Terminals — A3, with its own measurement pass. The window title and anything Accessibility-dependent. Correcting a place from inside the panel (`metadata["cwd"]` keeps it repairable later). Resolving a place for the recorder's ambient rows. JetBrains and Sublime, whose formats differ and which are absent here — `EditorFamily.all` is where they would go. Anything in B, C, D or E.
+
+### 7. Decisions to confirm at review
+
+1. **`staleness` of seven days** is generous by design: the file records the window you last focused, which remains true for as long as you stay in it, and nothing asks unless that editor is frontmost. It exists only to refuse an answer left by a previous session. Confirm, or tighten.
+2. **Multi-root workspaces yield nil**, not a first-root guess. That is the silence-over-a-guess rule; say if you would rather have the first root.
 
 ## Testing
 
-`Sources/FlowTraceTests/PlaceResolverTests.swift`, registered in `main.swift`. The `ProcessProbe` seam makes the composition testable too, which matters because the one composition bug with real consequences — walking the wrong pid — is invisible at runtime.
+`Sources/FlowTraceTests/EditorPlaceTests.swift`, registered in `main.swift`. The file read is the only untestable part, which is why parsing is a separate public function over `Data`:
 
-- `parse`: a captured `ps` sample including the header, a `??` tty, a `-zsh` login form, `/opt/homebrew/bin/zsh`, and **`…/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)`** — the spaces-and-parentheses case a naive whitespace split corrupts. Assert `command` intact *and* `tty` correct on that row.
-- `descendants`: the real chain `Electron 29392 → Code Helper 3562 → zsh 3569` reaches the shell; an unrelated shell is excluded; a self-parenting cycle terminates; the depth cap holds.
-- `shells`: accepts `zsh`, `-zsh`, `-bash`, `/bin/bash`, `/opt/homebrew/bin/zsh`, `fish`; rejects `Code Helper`, `claude`, `TMUX`, and anything with no tty.
-- `rank`, using the probe's real numbers: a descendant at 54811s idle **loses to nothing** — it is cut by `ownShellWindow` — while a descendant at 6s wins over a non-descendant at 0s (tier beats recency). Among two descendants the less idle wins. Among non-descendants, one at 85s wins and one at 3608s yields nil (`recentShellWindow`). A candidate with an unreadable cwd is absent from `rootForPID` and must not be selected while a readable sibling exists. Empty candidates → nil.
-- `place(forFrontmost:)` with a stub `ProcessProbe`: resolves the expected root for the VS Code chain; returns nil when the frontmost pid has no shells and every other shell is stale; and — the regression that matters — **asked for a pid whose subtree contains no shells, it must not return a `.ownShell` answer from another app's subtree.**
+- `lastActiveFolder`: a real captured `storage.json` (trimmed, with the author's paths replaced) yields the focused folder and **not** any of the five `openedWindows` entries; a percent-encoded path (`file:///Users/dev/my%20project`) decodes; a window with `workspaceIdentifier` and no `folder` yields nil; missing `windowsState`, missing `lastActiveWindow`, an empty object, truncated JSON, and non-JSON bytes all yield nil rather than throwing.
+- `EditorFamily.matching`: each listed bundle id resolves to the right support directory; `com.apple.Safari` and nil resolve to nothing.
+- `place(forBundleIdentifier:support:staleness:)` against a temporary directory containing a fixture `storage.json`: resolves the folder; refuses when the file's modification date is beyond `staleness`; returns nil for a bundle id with no family, for a missing file, and for a folder that no longer exists on disk.
+- `Store.describeActivity(id:metadata:)`: merges without clobbering an existing `tabsOpen`/`asked`; removes `place` and `cwd` when passed nil for them (the clearing path in §4); leaves an unrelated row untouched.
 
-Not unit-testable in the Core-only harness: `SystemProcessProbe`'s three system reads, the snapshot and header changes, the timeline row. Covered by the manual pass.
+Not unit-testable in the Core-only harness: the snapshot and header changes, the timeline row, the Smart Capture wiring — covered by the manual pass.
 
 ## Manual verification
 
-The author's machine is the ideal fixture: eight projects open in one VS Code, a `Terminal.app` whose shells are re-parented, a tmux session, and agents streaming to several ttys.
-
-1. In VS Code, type something in the integrated terminal of the `flowtrace` worktree, then press the shortcut. The header reads **`smart-capture`** — the worktree's own folder, which is what Now calls that place too — with `Code · typed here just now` beneath. Save, then `Scripts/verify-capture.sh notes` shows `metadata` carrying `place` and `cwd`, and `target` still empty for an `.app` row.
-2. Type in a different project's terminal, press the shortcut → the header follows to that project.
-3. **The mtime trap:** find a terminal where an agent is streaming but you have not typed for a while, focus VS Code, and press the shortcut → it must *not* resolve to that project. This is the case the first draft got wrong.
-4. In `Terminal.app` at some repo, type, then press the shortcut → resolves via the recency fallback and the line says `best guess from your terminals`.
-5. Over an app with no terminal in its tree and nothing typed anywhere for a few minutes — TextEdit, WhatsApp — the header is the app name, as today. No wrong guess.
-6. In a browser → unchanged: page title, host, link stored. Confirm no regression.
-7. **Coalescing, the risk this design exists to avoid:** with recording on, capture in VS Code, then wait out two recorder ticks (~60s) and check `Scripts/verify-capture.sh peek`. There must be **one** span for `Code`, not a truncated noted one followed by a fresh bare one.
-8. Press the shortcut in a repo with a project note → Smart Capture suggests it.
-9. The panel must still draw instantly; the place arriving a beat later is fine, a stall is not.
+1. **The case that started this.** In a VS Code window on `venture/flowtrace`, press the shortcut. The header reads **`flowtrace`** with `Code · VS Code's current window` beneath. Save, then `Scripts/verify-capture.sh notes` shows `metadata` carrying `place` and `cwd`, and `target` still empty for an `.app` row.
+2. **The freshness question, which is the one real risk.** Switch to a VS Code window on a *different* project and press the shortcut immediately. The header must follow. If it lags, VS Code writes `storage.json` on a timer rather than on window focus, and §1's staleness bound is the wrong control — report it rather than working around it, because it decides whether this design holds.
+3. In Cursor, if a project is open there → same behaviour, from Cursor's own file.
+4. In a terminal, over TextEdit, over WhatsApp → the header is the app name, exactly as today. No guess. (Terminals are A3.)
+5. In a browser → unchanged: page title, host, link stored. Confirm no regression.
+6. **Coalescing, the risk §4 exists to avoid:** recording on, capture in VS Code, wait out two recorder ticks (~60s), then `Scripts/verify-capture.sh peek`. There must be **one** span for `Code`, not a truncated noted one followed by a fresh bare one.
+7. **The stale-place case:** capture in project A, switch VS Code to project B, capture again → B's note must not be labelled `A`. Then quit VS Code and capture over something else → no place at all, not a leftover.
+8. Press the shortcut in a repo with a project note → Smart Capture suggests it, on the *first* capture, not the second.
+9. The panel must still draw instantly.
