@@ -130,6 +130,14 @@ var readableSources: AgentSources {
 
 Redaction of what *is* read (C). The onboarding rewrite, including Connect buttons on the last onboarding step — with B alone, a first-run user with a never-granted browser sees no tabs until they click Connect in Now or Settings; D closes that (D). Recording and launch-at-login toggles in onboarding (D). The README literal-truth pass beyond the one sentence above (E). Retiring or gating `CaptureSheet` (D).
 
+### 8. A hole this spec does not close, found later
+
+This spec's consent model rests on an assumption that holds for the app and the CLI and **fails for an MCP server**: that running the command *is* the consent. `flowtrace now` is typed by a person who wants an answer; the `.all` default is therefore honest there.
+
+An MCP tool is called by an agent, unattended, possibly many times a session, and possibly while the user is not watching. "The invocation is the consent" is not true of it. `ConsentSettings` also lives in `FlowTraceApp` on `UserDefaults` and is unreachable from the CLI process, so the MCP server cannot read the user's actual choice.
+
+`docs/superpowers/specs/2026-09-05-flowtrace-as-agent-memory-design.md` works around this with an explicit `--sources` flag in the client configuration, which is a reasonable stopgap but puts the consent decision in a config file rather than in the app. **The real fix belongs here**: consent needs to live somewhere both processes can read — most likely the database, which the CLI already opens — rather than in `UserDefaults` owned by the app. Fold that into this sub-project when it is built.
+
 ## Testing
 
 New `Sources/FlowTraceTests/ConsentTests.swift` with `func runConsentTests(fixtures: URL)`, **registered in `main.swift`'s call list** (a flat list — a new suite that isn't added there silently never runs). Core-only harness; adapters pointed at `Fixtures/claude` and `Fixtures/codex` via `root:` as the adapter tests already do. The fixtures are dated 2026-07-14 (Claude 09:00Z, Codex 11:00–11:05Z), which fall on *different local days* at extreme offsets, so derive each assertion's `on:` day from that source's own fixture timestamp rather than sharing one date; and note `CodexAdapter.discoverSessions(modifiedWithin: 2)` filters on file mtime — checkout time for a fixture.
