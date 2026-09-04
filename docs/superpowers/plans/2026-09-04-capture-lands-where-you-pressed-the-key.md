@@ -421,7 +421,7 @@ git commit -m "Decide where a captured note lands, in one testable place"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add these suites **at the end of `runActivityTests()`** in `Sources/FlowTraceTests/ActivityTests.swift` — inside that function, because the store helper it uses is a nested `func store() throws -> Store { try Store(database: FlowTraceDatabase.inMemory()) }` declared at the top of it (the file declares the same helper again inside a later top-level function, so placement is what puts it in scope).
+Add these suites **at the end of `runActivityTests()`**, before its closing brace at line 143 — inside that function, because the store helper it uses is a nested `func store() throws -> Store { try Store(database: FlowTraceDatabase.inMemory()) }` declared at line 7. A second, identically-named helper exists inside a later top-level function, so placement is what puts the right one in scope.
 
 Two things about `allActivity(on:)` that these tests have to respect: it defaults to `minimumSeconds: 20` and drops shorter *unexplained* `.app` rows, so every assertion below passes `minimumSeconds: 0` explicitly — a zero-length span with no note would otherwise vanish and the `unwrap` would throw. Rows carrying a note are kept regardless of length, which is why the noted-point suite does not need it.
 
@@ -674,9 +674,12 @@ In `AppModel.swift`, `startRecordingIfEnabled()` (line 132). The close must be *
 
         if isRecording { recorder.start() }
         importSessions()
-        …
+        // …the rest of the function — importSessions() and the detached
+        // pruneAmbientActivity() Task — is unchanged. Do not remove it.
     }
 ```
+
+Note the new `store` reference sits in the same scope as the existing `let store = self.store` further down; that is legal and not a use-before-declaration error.
 
 - [ ] **Step 3: Correct the comment that lies**
 
@@ -707,6 +710,8 @@ git commit -m "Know when the machine was last alive, and close the span on quit"
 
 ## Task 4: The snapshot knows the tab it is on
 
+> **Execute Tasks 4 and 5 together, as one unit of work, with one build and one commit at the end of Task 5.** Task 4 deletes `resolvingBrowserTab()`, whose only caller is `QuickCaptureView`, so the tree does not build in between. They are written as two tasks only because they touch two files and read more clearly apart.
+
 **Files:**
 - Modify: `Sources/FlowTraceApp/Capture/FrontmostSnapshot.swift`
 
@@ -717,10 +722,6 @@ Today `resolvingBrowserTab()` (line 60-77) enumerates every tab and picks `tabs.
 Add to `FrontmostSnapshot`:
 
 ```swift
-    /// Set when the browser is one we can read but the tab has not been read
-    /// yet — distinct from `automationDenied`, where it never will be.
-    var tabUnread: Bool { isBrowser && url == nil && !automationDenied }
-
     /// The rules in `FlowTraceCore` decide where a note lands; this is what
     /// they are given.
     var site: CaptureSite {
@@ -769,19 +770,13 @@ Replace `resolvingBrowserTab()` with two functions — identity first, because `
 
 Leave `resolvingBrowserTab()` deleted — `QuickCaptureView` is its only caller and Task 5 rewrites that call.
 
-- [ ] **Step 2: Build**
+- [ ] **Step 2: Do not build or commit yet — continue straight into Task 5**
 
-Run: `swift build`
-Expected: FAILS in `QuickCaptureView.swift` — `resolvingBrowserTab` is gone. That is the next task; do not fix it here. Confirm the only errors are that call site.
+The only remaining reference to `resolvingBrowserTab` is `QuickCaptureView.swift:297`, which Task 5 rewrites. If you build now the single expected error is:
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add Sources/FlowTraceApp/Capture/FrontmostSnapshot.swift
-git commit -m "Read the tab you are on, not the first tab in the window"
 ```
-
-(Committing a non-building tree is deliberate here: Tasks 4 and 5 are one change split for reviewability, and the next task restores the build. If your workflow forbids it, do Tasks 4 and 5 as one commit.)
+QuickCaptureView.swift:297: value of type 'FrontmostSnapshot' has no member 'resolvingBrowserTab'
+```
 
 ---
 
@@ -792,7 +787,7 @@ git commit -m "Read the tab you are on, not the first tab in the window"
 
 - [ ] **Step 1: New state**
 
-In the `@State` block (lines 15-21), add:
+In the `@State` block (lines 15-20; line 21 is `@FocusState private var focused`), add:
 
 ```swift
     @State private var plan: CapturePlan?
@@ -814,6 +809,14 @@ Replace `load()` (lines 287-307):
         current = try? model.store.openActivity()
         leadingUp = (try? model.store.activityLeadingUp(to: Date())) ?? []
         refreshPlan()
+        // For a terminal or an editor this is the final answer, so the field is
+        // filled before the panel draws rather than a beat later.
+        if let prefill = CaptureTargeting.prefill(
+            open: current, site: resolved.site, recording: model.recorder.isRunning
+        ) {
+            note = prefill
+            shownNote = prefill
+        }
         recomputeSuggestion(tabNote: nil)
 
         // The tab is read in two steps. Which tab you are on decides where the
@@ -852,11 +855,11 @@ Replace `load()` (lines 287-307):
     }
 ```
 
-Note what is deliberate: `note` is no longer seeded from `current?.note` (line 291 today). That line is the recording-off overwrite bug — it put an unrelated row's words in the field. The pre-fill now comes only from `CaptureTargeting.prefill`, which returns nil while a browser tab is unread, and `enrichmentFinished` is set outside the `identified != snapshot` check so a non-browser app — where `resolvingActiveTab` returns `self` — never waits.
+Note what is deliberate: `note` is no longer seeded from `current?.note` (line 291 today). That line is the recording-off overwrite bug — it put an unrelated row's words in the field. The pre-fill now comes only from `CaptureTargeting.prefill`, which returns nil while a browser tab is unread — which is why it is computed twice, once at load (final answer for a terminal or editor) and once when the tab lands (the browser's answer). `enrichmentFinished` is set outside the `identified != snapshot` check so a non-browser app — where `resolvingActiveTab` returns `self` — never waits.
 
 - [ ] **Step 3: The header stops showing someone else's duration**
 
-In `header` (lines 82-86), `current.durationLabel` is shown whenever the span is open, which after a tab switch is the previous tab's duration under the new tab's title. Gate it:
+In `header` (lines 83-86), `current.durationLabel` is shown whenever the span is open, which after a tab switch is the previous tab's duration under the new tab's title. Gate it:
 
 ```swift
                 if let current, current.isOpen, isAnnotatingOpenSpan {
@@ -1016,7 +1019,7 @@ Clear it as soon as the text changes — add to the `TextField` chain:
                 .onChange(of: note) { _, _ in saveError = nil }
 ```
 
-And make Escape a no-op while a write is in flight, so a dismissal cannot race a save that is already committed (line 153-157):
+And make dismissal a no-op while a write is in flight, so it cannot race a save that is already committed. Both ways out need it — Escape (line 153-157):
 
 ```swift
         .background {
@@ -1026,10 +1029,16 @@ And make Escape a no-op while a write is in flight, so a dismissal cannot race a
         }
 ```
 
+and the header's close button (line 56), which the spec did not name but which dismisses just as effectively:
+
+```swift
+                Button(action: { if !saving { onFinish() } }) {
+```
+
 - [ ] **Step 3: Build**
 
 Run: `swift build`
-Expected: clean. If the compiler objects to `switch plan ?? …` over a non-`Equatable` enum, bind first: `guard let plan else { return }` after `refreshPlan()` (it always assigns), and switch on that.
+Expected: clean. The `switch plan ?? …` form compiles as written — `??` and enum-case patterns need no `Equatable`. Do **not** "simplify" it to `guard let plan else { return }`: `write(_:)` is called inside `save()`'s `do` block, so an early `return` there is a *success* path — `model.refresh()`, `saved = true`, "Written down.", dismiss — and the sentence would be gone behind a confirmation. That is the exact failure this sub-project exists to remove.
 
 - [ ] **Step 4: Run the suite**
 
