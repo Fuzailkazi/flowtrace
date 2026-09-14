@@ -1,219 +1,382 @@
 # FlowTrace
 
-**You have eleven coding agents running. Seven have been idle for four days. Can you say what any of them were doing?**
+**Remember what you were doing. Find it when you forget.**
 
-FlowTrace is a macOS app that shows you what is actually happening on your
-machine — which agents are running and where each one stopped, which servers are
-still holding ports, what you had open — and lets you attach *why* to any of it,
-in one keystroke, without leaving what you're doing.
+FlowTrace is a native macOS memory and retrieval tool for your work.
 
-It reads only what your machine already wrote down. No screen recording, no OCR,
-no keystroke logging, and nothing ever leaves the device.
+It captures useful context from the things you interact with on your computer, stores it locally, and lets you recover that context later when you no longer remember where something came from.
 
-```
-15 places · 7 left running and forgotten
+The goal is simple:
 
-●  gtm                                                     just now
-   waht kind of content should i post from my account i.e fuzailkazi_ on x
+> **You shouldn't have to remember where you saw something in order to find it again.**
 
-●  aum                                                      29m ago
-   add more animation make this site a genz website it looks liek a 90s webstie
+---
 
-○  tulu                                                4d ago · idle
-   give me a good detail so that i knwo what i have to say on the loom video
-   listening  :3000
-   ● what are you building here?
-```
+## Why FlowTrace?
 
-That is real output from a real machine, and the `tulu` line is the point: an
-agent abandoned four days ago **and** a dev server still holding port 3000. Two
-facts that mean little apart and a lot together.
+A lot of useful information passes through our computers every day:
 
-## Three surfaces
+- A screenshot of a product or pricing page
 
-**Now** — what's happening this second. Running agents, what you last asked each
-one, how long since anything moved, and every local server with the project it
-was started from. Grouped by place, because work happens in places: an agent in
-`tulu` and a server started in `tulu/frontend` are one thing, not two.
+- An error message
 
-**Why** — intent, captured where you are. Press the shortcut anywhere and a small
-panel appears over what you're doing, already knowing where you are and what led
-there. Type a sentence, press return, and it lands on the timeline. **The note
-outlives the thing** — close the tab, quit the agent, reboot; next week you can
-still find out why you opened it.
+- A useful AI response
 
-**Then** — what you're building in each place. Written once against the
-repository rather than a session or a process, so it survives everything that
-ends.
+- A piece of code
 
-## What it reads, and what it refuses to
+- A design
 
-FlowTrace only ever reads things that already exist on disk:
+- An article
 
-| It reads | It does not |
-|---|---|
-| Which app is frontmost (no permission needed) | Record your screen |
-| The focused window's title (Accessibility) | OCR anything |
-| The active browser tab's title and URL (Automation) | Log keystrokes |
-| Coding-agent transcripts your agents wrote themselves | Attach to or inject into any process |
-| Git state via four read-only commands | Write to any repository |
-| Which processes are listening on which ports | Send anything anywhere |
+- A browser page
 
-**No network requests.** There is no HTTP client in the codebase — no telemetry,
-no crash reporting, no model API. It *listens* on `127.0.0.1` when you switch the
-browser-extension endpoint on, so the extension and CLI can hand it captures;
-that socket is loopback-bound, off by default, and token-gated on every route but
-`/health`.
+- A terminal session
 
-**Nothing is recorded until you switch it on**, nothing while the screen is
-locked or you've stepped away, and FlowTrace never records itself. Everything
-lives in one SQLite file you can open yourself:
+- An idea or thought
 
-```
-~/Library/Application Support/FlowTrace/flowtrace.sqlite
+- Something you were working on earlier
+
+We often recognize that something is useful and intend to come back to it.
+
+Then we forget.
+
+We don't remember the exact application, window, URL, project, or time when we saw it.
+
+FlowTrace is designed to preserve enough context that the memory can be recovered later.
+
+---
+
+## The Core Experience
+
+FlowTrace revolves around a simple loop:
+
+```text
+See something
+     ↓
+Remember it
+     ↓
+FlowTrace captures useful context
+     ↓
+Continue working
+     ↓
+Forget where / why
+     ↓
+Retrieve it
+     ↓
+Recover the context
 ```
 
-Settings → **What FlowTrace knows** lists exactly what is held — notes you wrote,
-records made automatically, pages seen, agent sessions, project notes — and how
-large the file is. You can erase only what was recorded automatically and keep
-everything you wrote, forget a single day, forget one entry, or delete
-everything. The file's path is shown with a Reveal button, because deleting it
-yourself should always be an option.
+The ideal outcome is:
 
-**Credentials are stripped before they are stored.** Prompts are the one free-text
-input, and free text contains whatever you pasted — a scan of `~/.claude/projects`
-on the machine this was built on found five live API keys sitting in prompts. Keys,
-tokens, JWTs and database URLs with passwords are redacted at the point text
-leaves the transcript, leaving the sentence around them readable.
+**"Thank god FlowTrace remembered that."**
 
-## Install
+---
 
-Requires macOS 14+ and the Xcode **Command Line Tools** — not Xcode.
+## Capture
 
-```bash
-git clone https://github.com/Fuzailkazi/flowtrace
-cd flowtrace
-./Scripts/bundle.sh release
-cp -R dist/FlowTrace.app /Applications/
-cp dist/flowtrace /usr/local/bin/          # optional CLI
+FlowTrace provides a lightweight Quick Capture experience that lets you save something without leaving the application you're currently using.
+
+There are two capture intentions.
+
+### Remember this
+
+Designed for things you want to visually remember.
+
+The screenshot is the primary memory.
+
+FlowTrace can also capture useful surrounding context such as:
+
+- Application
+
+- Window
+
+- Browser page
+
+- URL
+
+- Project or repository
+
+- Relevant activity
+
+- Agent context when available
+
+You can optionally add a note.
+
+### Take a note
+
+Designed for capturing a thought or piece of information.
+
+The text is the primary memory.
+
+Useful surrounding context is captured automatically, while screenshots remain optional and are off by default.
+
+This distinction keeps capture intentional rather than turning every note into a screenshot.
+
+---
+
+## Memory
+
+FlowTrace treats a saved item as a **Memory**.
+
+A memory can contain multiple types of evidence and context.
+
+For example:
+
+```text
+Memory
+├── Primary content
+│   ├── Screenshot
+│   └── Note
+│
+├── Application context
+│   ├── Application
+│   └── Window
+│
+├── Browser context
+│   ├── URL
+│   └── Page title
+│
+├── Development context
+│   ├── Repository
+│   └── Project
+│
+└── Agent context
+    ├── Agent
+    ├── Session
+    └── Working directory
 ```
 
-Builds are ad-hoc signed, so macOS quarantines the app on a machine that didn't
-build it:
+The purpose isn't to build a giant knowledge graph.
 
-```bash
-xattr -dr com.apple.quarantine /Applications/FlowTrace.app
+It is to preserve enough evidence to reconstruct **what you were looking at and what you were doing**.
+
+---
+
+## Retrieval
+
+Capturing something is only useful if you can find it again.
+
+FlowTrace provides local retrieval through the macOS application and CLI.
+
+You can search for memories using the information you remember.
+
+For example:
+
+```text
+"that Stripe pricing screenshot"
+
+"the error I saw yesterday"
+
+"that black keyboard"
+
+"the article about AI agents"
+
+"what was I working on in the terminal?"
 ```
 
-Set `FLOWTRACE_SIGN_IDENTITY` to a Developer ID before running `bundle.sh` to
-produce a distributable build.
+The more useful context FlowTrace has captured, the less you need to remember yourself.
 
-## Using it
+---
 
-**The app** opens on *Now*. The `Now / Today` switch moves between live state and
-the day you can read.
+## Product Surfaces
 
-**The shortcut** is `⌥Space` by default, and configurable in Settings — click the
-field and press whatever you want. It can also be a bare modifier tap (left ⌥ on
-its own), which needs Accessibility and can misfire; double-tap is steadier. If
-another app already owns your combination, Settings says so instead of leaving a
-dead key.
+FlowTrace currently has three primary surfaces.
 
-**The CLI** works whether or not the app is running:
+### macOS App
 
-```bash
-flowtrace now         # what's running, grouped by place
-flowtrace brief       # where you left this repository, ready to hand to an agent
-flowtrace scan        # repositories with unfinished work in them
-flowtrace resume <x>  # everything you need to pick a thread back up
-flowtrace attach      # attach this repository to a thread
-flowtrace serve       # the capture endpoint, without the app
-```
+The native macOS application is the primary user experience.
 
-`./Scripts/install-hook.sh` registers a `SessionStart` hook so `flowtrace brief`
-is handed to Claude Code whenever you start it in a repository you left something
-in. It stays silent unless it has something to say — nothing if you were here in
-the last two hours, nothing for a clean tree, nothing for scratch worktrees.
+It provides:
 
-## How some of it works
+- Quick Capture
 
-A few things were harder than they look, and the notes are in the code:
+- Current activity context
 
-**Spans, not points.** Forty alt-tabs must become one timeline entry, not forty.
-Staying put extends a span; nipping to Slack and back within five minutes resumes
-the old one rather than splitting your morning into three lines.
+- Memory history
 
-**`lsof` lies about failure.** It exits non-zero whenever any one of its
-selections matches nothing — so `-c claude -c codex` with no Codex running
-reports failure on a perfectly good read. It also only saw four of seventeen
-running agents, because it cannot inspect every process. Discovery uses `pgrep`;
-one batched `lsof -p` resolves the directories.
+- Retrieval and search
 
-**Transcript tails.** Reading each agent transcript end-to-end cost two seconds
-across eleven agents. Only the tail is read, widening from 512KB to 4MB when a
-long agent turn has pushed the last human prompt out of reach. 2.0s → 0.6s.
+- Settings
 
-**`isMeta`.** Claude Code writes injected skill bodies and slash-command
-expansions as user turns. They are indistinguishable from you until you check
-that flag — before FlowTrace honoured it, proposals came out titled *"Base
-directory for this skill: …"*.
+- Onboarding
 
-**`/var` is not `/private/var`.** Foundation's `resolvingSymlinksInPath()`
-deliberately leaves that pair alone; `git rev-parse` resolves it. Two spellings of
-one directory compared as two different repositories until every path went
-through `realpath`.
+### CLI
+
+The `flowtrace` CLI provides a power-user interface for interacting with FlowTrace from the terminal.
+
+This makes FlowTrace useful inside developer workflows and automation.
+
+### Browser Extension
+
+The browser extension acts as a context bridge between browser activity and the native FlowTrace application.
+
+It provides browser-specific information such as pages, URLs, and titles that can become part of a memory.
+
+---
 
 ## Architecture
 
-```
-Sources/
-  FlowTraceCore/     no UI — models, SQLite store, FTS5 search, git probe,
-                     agent adapters, live process reader, activity recorder,
-                     AppleScript tab reader, loopback server
-  FlowTraceApp/      SwiftUI — Now, the day timeline, quick-capture panel
-  flowtrace/         the CLI
-  FlowTraceTests/    101 tests
-Extension/           MV3 browser extension
-```
+FlowTrace is designed as a local-first macOS application.
 
-Native Swift 6 and SwiftUI, built with Swift Package Manager and no Xcode.
-Two dependencies: GRDB for SQLite and Swift Argument Parser for the CLI. Nothing
-else — the loopback server is a plain BSD socket, which is what makes binding to
-`INADDR_LOOPBACK` a guarantee rather than a setting.
-
-`FlowTraceApp` holds no business logic, which is why the CLI and the app behave
-identically and why the logic is testable headlessly.
-
-Adding an agent means implementing one protocol method, `discoverSessions()`.
-Cursor, OpenCode and Gemini CLI deliberately have no adapter: their local stores
-are thin or opaque, and a parser that silently returns wrong data is worse than
-honest manual capture.
-
-## Tests
-
-```bash
-./Scripts/test.sh
+```text
+                   ┌─────────────────────┐
+                   │      macOS App       │
+                   │                     │
+                   │  Capture / Now /     │
+                   │  History / Search    │
+                   └──────────┬──────────┘
+                              │
+                              ▼
+                   ┌─────────────────────┐
+                   │    FlowTraceCore    │
+                   │                     │
+                   │ Activity / Context   │
+                   │ Capture / Retrieval │
+                   │ Privacy / Storage   │
+                   └───────┬─────┬───────┘
+                           │     │
+             ┌─────────────┘     └─────────────┐
+             ▼                                 ▼
+     ┌───────────────┐                 ┌───────────────┐
+     │ SQLite / FTS5 │                 │ Browser       │
+     │ Local Memory  │                 │ Extension     │
+     └───────────────┘                 └───────────────┘
 ```
 
-The suite is an executable rather than an XCTest target, because XCTest ships
-with Xcode and this project targets the Command Line Tools. It runs against
-committed fixtures and temporary git repositories — never against your real
-`~/.claude` or `~/.codex`.
+The core logic lives in `FlowTraceCore`, which is shared across the application and CLI.
 
-## Status
+---
 
-Early, and honest about it.
+## Local-First
 
-**Working:** the Now view, the day timeline with inline annotation, ambient
-capture of apps and windows and tabs, agent session import, project notes,
-quick-capture panel, configurable shortcut, the CLI, the `SessionStart` hook,
-search, export, delete.
+FlowTrace is designed around local data storage.
 
-**Not yet:** you can see seven forgotten agents but not stop them — seeing isn't
-acting, and that's the next thing worth building. "What did I do last time" and
-paused/resumed are unbuilt. Open apps and tabs appear in the timeline but not in
-Now.
+Memory is stored in a local SQLite database with FTS5-powered search.
 
-**Unverified:** light mode. Everything has been looked at in dark.
+This architecture keeps the core experience:
 
-MIT.
+- Fast
+
+- Private
+
+- Available offline
+
+- Independent of a cloud backend
+
+Privacy-sensitive context is processed through the application's privacy and redaction layers before being persisted.
+
+---
+
+## Project Structure
+
+A simplified view of the repository:
+
+```text
+FlowTrace/
+├── FlowTrace/
+│   └── macOS application
+│
+├── FlowTraceCore/
+│   └── shared application logic
+│
+├── flowtrace/
+│   └── CLI
+│
+├── BrowserExtension/
+│   └── browser context bridge
+│
+├── Tests/
+│   └── unit and integration tests
+│
+└── README.md
+```
+
+The exact structure may evolve as the application develops.
+
+---
+
+## Development
+
+FlowTrace is a native macOS project built primarily with Swift and SwiftUI.
+
+The project uses:
+
+- Swift
+
+- SwiftUI
+
+- SQLite
+
+- SQLite FTS5
+
+- macOS APIs
+
+- WebExtension APIs
+
+### Requirements
+
+- macOS
+
+- Xcode
+
+- Swift toolchain
+
+### Build
+
+Open the project in Xcode and build the macOS application normally.
+
+The CLI can be built and run independently using the project's Swift tooling.
+
+### Tests
+
+Run the project's test suite through Xcode or the appropriate Swift Package Manager commands.
+
+The test suite covers core functionality including memory capture, activity tracking, retrieval, storage, and privacy-related behavior.
+
+---
+
+## Design Principles
+
+FlowTrace is built around a few simple principles.
+
+### Capture should be lightweight
+
+Saving something should not interrupt the user's workflow.
+
+### Context should be automatic
+
+Users shouldn't have to manually describe where they were every time they save something.
+
+### Memory should be useful later
+
+The value of a memory comes from being able to recover it after the original context is gone.
+
+### Retrieval should reduce remembering
+
+The user should be able to search using what they remember, rather than reconstructing exactly where something happened.
+
+### Privacy should be fundamental
+
+Computer context can be extremely sensitive. Local storage and controlled data handling are therefore fundamental parts of the architecture.
+
+### Keep the product focused
+
+FlowTrace is about **memory and retrieval**.
+
+It is not intended to become a generic task manager, chat assistant, collaboration platform, or cloud knowledge-management system.
+
+---
+
+## Project Status
+
+FlowTrace is an actively developed macOS application.
+
+The repository contains the native application, shared core, CLI, browser extension, local storage, activity tracking, capture, and retrieval infrastructure.
+
+The product and implementation continue to evolve as the core memory experience is refined.
+
+---
+
+## License
+
+See the repository's license information for details.
