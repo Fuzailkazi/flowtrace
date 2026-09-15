@@ -68,13 +68,18 @@ extension Store {
     public func saveProjectNote(_ note: ProjectNote) throws -> ProjectNote {
         var note = note
         note.updatedAt = Date()
-        try database.writer.write { db in try note.save(db) }
+        try database.writer.write { db in
+            try note.save(db)
+            try MemoryIndexing.index(db, note: note)
+        }
         return note
     }
 
     public func deleteProjectNote(repositoryPath: String) throws {
         _ = try database.writer.write { db in
-            try ProjectNote.deleteOne(db, key: FilePathCanon.canonical(repositoryPath))
+            let key = FilePathCanon.canonical(repositoryPath)
+            try SearchIndex.remove(db, kind: .place, recordId: key)
+            try ProjectNote.deleteOne(db, key: key)
         }
     }
 }

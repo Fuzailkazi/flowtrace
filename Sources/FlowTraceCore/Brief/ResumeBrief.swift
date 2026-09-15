@@ -25,6 +25,17 @@ public struct ResumeBrief: Equatable, Sendable {
     /// How many credential-shaped strings were removed on the way in.
     public var redactionCount: Int
 
+    /// Whether the elapsed time above can be attributed to a person.
+    ///
+    /// `daysSinceActivity` and `hoursSinceActivity` are measured from the most
+    /// recent thing that happened here, which includes agent turns and, on the
+    /// machine this was found on, a weekly scheduled task. Saying "you worked
+    /// on gtm 22 hours ago" when the twenty-two hours belong to a cron job is
+    /// a claim about the user that FlowTrace has no evidence for.
+    ///
+    /// False means the same number, said as what it is: something wrote here.
+    public var elapsedIsHuman: Bool
+
     public init(
         repositoryName: String,
         repositoryPath: String,
@@ -37,8 +48,10 @@ public struct ResumeBrief: Equatable, Sendable {
         lastCommitSubject: String? = nil,
         recentPrompts: [String] = [],
         sessionTitle: String? = nil,
-        redactionCount: Int = 0
+        redactionCount: Int = 0,
+        elapsedIsHuman: Bool = true
     ) {
+        self.elapsedIsHuman = elapsedIsHuman
         self.repositoryName = repositoryName
         self.repositoryPath = repositoryPath
         self.branch = branch
@@ -53,8 +66,22 @@ public struct ResumeBrief: Equatable, Sendable {
         self.redactionCount = redactionCount
     }
 
+    /// The whole opening sentence, worded to match the evidence behind it.
+    ///
+    /// Two sentences rather than one with a hedge in it. "You were last here"
+    /// is a strong, useful claim and is made only when a human turn could be
+    /// dated. Otherwise the subject changes to what was actually observed —
+    /// a write — and the reader is told plainly that nobody can say when they
+    /// were last here.
+    public var openingSentence: String {
+        elapsedIsHuman
+            ? "You were last here \(elapsedPhrase), on branch \(branch)."
+            : "Something last wrote here \(elapsedPhrase), on branch \(branch). "
+              + "Nothing in the transcript says when you were last here yourself."
+    }
+
     /// "2 days", "5 hours" — the unit people actually use for how cold something is.
-    var elapsedPhrase: String {
+    public var elapsedPhrase: String {
         if daysSinceActivity >= 1 {
             return daysSinceActivity == 1 ? "yesterday" : "\(daysSinceActivity) days ago"
         }
@@ -65,7 +92,7 @@ public struct ResumeBrief: Equatable, Sendable {
     }
 
     /// Source files first — a lockfile in this list wastes the reader's attention.
-    var notableFiles: [String] {
+    public var notableFiles: [String] {
         let meaningful = changedFiles.filter { !DetectionEvidence.isGenerated($0) }
         let pool = meaningful.isEmpty ? changedFiles : meaningful
         return pool.prefix(6).map { path in
@@ -83,7 +110,12 @@ public struct ResumeBrief: Equatable, Sendable {
     /// work itself, and a preamble that crowds out the task defeats its purpose.
     public func render() -> String {
         var lines: [String] = []
-        lines.append("You worked on \(repositoryName) \(elapsedPhrase), on branch \(branch).")
+        lines.append(
+            elapsedIsHuman
+                ? "You worked on \(repositoryName) \(elapsedPhrase), on branch \(branch)."
+                : "Something last wrote to \(repositoryName) \(elapsedPhrase), on branch "
+                  + "\(branch) — not necessarily you."
+        )
 
         if let sessionTitle, !sessionTitle.isEmpty {
             lines.append("That session was about: \(sessionTitle).")

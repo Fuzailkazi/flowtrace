@@ -199,7 +199,7 @@ struct NowView: View {
     /// The place that is moving, given the room the design gives it.
     private func spotlightCard(_ project: LiveProject) -> some View {
         let canonical = FilePathCanon.canonical(project.path)
-        let isLive = project.agents.contains { $0.state != .idle }
+        let isLive = project.agents.contains { $0.state.isActive }
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: Journal.Space.xl) {
@@ -229,11 +229,19 @@ struct NowView: View {
 
                 HStack(spacing: Journal.Space.m) {
                     Button {
-                        openInFinder(project)
+                        model.route = .place(project.path)
                     } label: {
-                        Label("Open in Finder", systemImage: "folder")
+                        Label("What was I doing here?", systemImage: "arrow.uturn.backward")
                     }
                     .buttonStyle(NowPrimaryButtonStyle())
+                    .help("Open what FlowTrace remembers about \(project.name)")
+
+                    Button {
+                        openInFinder(project)
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .buttonStyle(NowIconButtonStyle())
                     .help("Open \(project.path) in Finder")
 
                     Button {
@@ -259,6 +267,8 @@ struct NowView: View {
         .clipShape(RoundedRectangle(cornerRadius: Journal.Radius.card))
         .compositingGroup()
         .shadow(color: .black.opacity(0.03), radius: 6, y: 2)
+        .contentShape(Rectangle())
+        .onTapGesture { model.route = .place(project.path) }
         .contextMenu { projectMenu(project) }
     }
 
@@ -428,6 +438,8 @@ struct NowView: View {
         }
         .nowCard(padding: Journal.Space.l)
         .onHover { hovering = $0 ? canonical : (hovering == canonical ? nil : hovering) }
+        .contentShape(Rectangle())
+        .onTapGesture { model.route = .place(project.path) }
         .contextMenu { projectMenu(project) }
     }
 
@@ -453,6 +465,7 @@ struct NowView: View {
 
     @ViewBuilder
     private func projectMenu(_ project: LiveProject) -> some View {
+        Button("What was I doing here?") { model.route = .place(project.path) }
         Button("Open in Finder") { openInFinder(project) }
         Button("Copy path") {
             NSPasteboard.general.clearContents()
@@ -560,9 +573,14 @@ struct NowView: View {
     // MARK: - Data
 
     private func colour(for project: LiveProject) -> Color {
-        if project.agents.contains(where: { $0.state == .working }) { return Journal.live }
-        if project.agents.contains(where: { $0.state == .waiting }) { return Journal.pen }
-        return Journal.ruleFirm
+        switch project.state {
+        case .working: return Journal.live
+        case .waiting: return Journal.pen
+        // Forgotten is the one the screen exists for, so it is the one thing
+        // that gets a colour of its own rather than the neutral rule.
+        case .forgotten: return Journal.amber
+        case .quiet, nil: return Journal.ruleFirm
+        }
     }
 
     private func oneLine(_ text: String) -> String {
@@ -575,6 +593,10 @@ struct NowView: View {
 
     private func recomputeProjects() {
         projects = state.projects(notes: notes).filter { !ignored.contains($0.path) }
+        // The recovery screen reads the row the user was looking at rather than
+        // taking a second census, so the two can never disagree about what is
+        // running.
+        model.recordCensus(projects)
     }
 
     /// Hiding rather than deleting, because the process is still running and

@@ -21,7 +21,17 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
     /// three is a story you can recognise.
     public var recentPrompts: [String]
     public var startedAt: Date?
+    /// When anything was last written to this session — agent turns included.
+    /// The agent's heartbeat, not yours.
     public var lastActivityAt: Date?
+    /// When a person last typed something here.
+    ///
+    /// Nil when nothing in the session can be attributed to a human: a run
+    /// started by a scheduled task, or one whose only user-slot entries were
+    /// injected. Left nil rather than falling back to `lastActivityAt`, because
+    /// the entire value of this field is that it does not quietly become the
+    /// other one.
+    public var lastHumanActivityAt: Date?
     public var filePath: String
     public var messageCount: Int
 
@@ -37,6 +47,7 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
         recentPrompts: [String] = [],
         startedAt: Date? = nil,
         lastActivityAt: Date? = nil,
+        lastHumanActivityAt: Date? = nil,
         filePath: String,
         messageCount: Int = 0
     ) {
@@ -51,6 +62,7 @@ public struct AgentSession: Codable, Identifiable, Hashable, Sendable {
         self.recentPrompts = recentPrompts
         self.startedAt = startedAt
         self.lastActivityAt = lastActivityAt
+        self.lastHumanActivityAt = lastHumanActivityAt
         self.filePath = filePath
         self.messageCount = messageCount
     }

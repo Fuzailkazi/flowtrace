@@ -260,5 +260,10 @@ extension Store {
                 body: row["content"] as String? ?? ""
             )
         }
+
+        // Memories and project notes, which the rebuild would otherwise drop on
+        // the floor: it empties the whole table first, so anything missing from
+        // here becomes unfindable the next time redaction runs.
+        try MemoryIndexing.indexEverything(db)
     }
 }

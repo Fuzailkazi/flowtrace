@@ -110,6 +110,7 @@ public struct CodexAdapter: AgentAdapter {
         var startedAt: Date?
         var lastActivityAt: Date?
         var messageCount = 0
+        var lastHumanActivityAt: Date?
 
         while let line = reader.next() {
             guard !line.isEmpty else { continue }
@@ -143,6 +144,13 @@ public struct CodexAdapter: AgentAdapter {
                 guard !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty else { continue }
                 let text = redacted.text
 
+                // As in the Claude adapter: dated only when a person plausibly
+                // typed it.
+                if !ClaudeTail.isMachineAuthored(text),
+                   let timestamp = object["timestamp"] as? String,
+                   let date = ISO8601.parse(timestamp) {
+                    lastHumanActivityAt = date
+                }
                 if firstPrompt == nil { firstPrompt = text }
                 lastPrompt = text
                 if AgentSession.isSubstantive(text) {
@@ -171,6 +179,7 @@ public struct CodexAdapter: AgentAdapter {
             recentPrompts: arc,
             startedAt: startedAt,
             lastActivityAt: lastActivityAt ?? meta.modifiedAt,
+            lastHumanActivityAt: lastHumanActivityAt,
             filePath: path,
             messageCount: messageCount
         )

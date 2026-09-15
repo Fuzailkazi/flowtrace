@@ -133,7 +133,11 @@ struct OnboardingView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Your shortcut")
                                 .font(.system(size: 12, weight: .medium))
-                            Text("⌥Space already works. Click it to use something else.")
+                            // The trigger the user actually has, not a key
+                            // written into the copy: this screen and Settings
+                            // used to disagree.
+                            Text("\(model.captureTrigger.displayString) already works. "
+                                 + "Click it to use something else.")
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         Spacer()

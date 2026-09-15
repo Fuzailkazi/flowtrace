@@ -18,6 +18,15 @@ struct MemoriesView: View {
     /// rather than looking like you never wrote anything.
     @State private var failure: String?
     @State private var query = ""
+    /// Ids of the memories the index matched, in the order it ranked them.
+    ///
+    /// The screen used to filter the loaded rows with `contains`, which meant
+    /// "auth" never found "authentication", nothing was ranked, and anything
+    /// past the four-hundred-row load simply did not exist. The index answers
+    /// all three. Nil means no search is running, which is different from a
+    /// search that matched nothing.
+    @State private var matches: [String]?
+    @State private var matchedPlaces: [String] = []
     @State private var filter: Filter = .all
     @State private var layout: Layout = .grid
     @State private var hovering: String?
@@ -42,10 +51,11 @@ struct MemoriesView: View {
                 if let failure {
                     LoadFailureNotice(message: failure) { Task { await load() } }
                 }
+                today
                 searchField
                 filterChips
                 stream
-                if !projects.isEmpty { building }
+                if !visibleProjects.isEmpty { building }
                 footer
             }
             .frame(maxWidth: 1152, alignment: .leading)
@@ -65,6 +75,7 @@ struct MemoriesView: View {
         }
         .task { await load() }
         .onChange(of: model.activityRevision) { Task { await load() } }
+        .onChange(of: query) { _, text in Task { await runSearch(text) } }
     }
 
     // MARK: - Header
@@ -94,6 +105,69 @@ struct MemoriesView: View {
             .background(Journal.wash, in: Capsule())
             .padding(.top, Journal.Space.xl)
         }
+    }
+
+    // MARK: - Today
+
+    /// The four things worth knowing before you read anything.
+    ///
+    /// Three of them are about places that are still running and come from the
+    /// live census the Now screen already took; the fourth is how much you
+    /// wrote today. Deliberately four numbers and not a dashboard: each one is
+    /// a way in, and the forgotten one is the reason the screen exists.
+    private var today: some View {
+        HStack(spacing: Journal.Space.m) {
+            todayTile(
+                "Forgotten", count: livePlaces.filter(\.isForgotten).count,
+                symbol: "moon.zzz", tint: Journal.amber,
+                route: livePlaces.first(where: \.isForgotten).map { Route.place($0.path) }
+            )
+            todayTile(
+                "Working", count: livePlaces.filter { $0.state == .working }.count,
+                symbol: "circle.fill", tint: Journal.live, route: nil
+            )
+            todayTile(
+                "Waiting", count: livePlaces.filter { $0.state == .waiting }.count,
+                symbol: "pause.circle", tint: Journal.pen, route: nil
+            )
+            todayTile(
+                "Notes", count: notesToday, symbol: "text.quote",
+                tint: Journal.inkMid, route: nil, filter: .today
+            )
+        }
+    }
+
+    private var livePlaces: [LiveProject] { model.census.projects }
+
+    private var notesToday: Int {
+        let calendar = Calendar.current
+        return memories.filter { calendar.isDateInToday($0.startedAt) }.count
+    }
+
+    private func todayTile(
+        _ title: String, count: Int, symbol: String, tint: Color,
+        route: Route?, filter target: Filter? = nil
+    ) -> some View {
+        Button {
+            if let route { model.route = route }
+            else if let target { filter = target }
+        } label: {
+            VStack(alignment: .leading, spacing: Journal.Space.xs) {
+                HStack(spacing: 5) {
+                    Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
+                    Text(title).font(.caption())
+                }
+                .foregroundStyle(count == 0 ? Journal.inkSoft : tint)
+                Text("\(count)")
+                    .font(.journalTitle(22))
+                    .foregroundStyle(count == 0 ? Journal.inkSoft : Journal.ink)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Journal.Space.m)
+            .background(Journal.card, in: RoundedRectangle(cornerRadius: Journal.Radius.card))
+        }
+        .buttonStyle(.plain)
+        .disabled(route == nil && target == nil)
     }
 
     // MARK: - Search
@@ -204,7 +278,6 @@ struct MemoriesView: View {
     // MARK: - Stream
 
     private var visible: [ActivityEvent] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let calendar = Calendar.current
         let now = Date()
         return memories.filter { event in
@@ -221,10 +294,37 @@ struct MemoriesView: View {
             case .app(let name): event.appName == name
             }
             guard passesFilter else { return false }
-            guard !needle.isEmpty else { return true }
-            return [event.note, event.target, event.url, event.appName, event.metadata["place"], event.metadata["cwd"]]
-                .contains { ($0 ?? "").localizedCaseInsensitiveContains(needle) }
+            guard let matches else { return true }
+            return matches.contains(event.id)
         }
+        // Ranked by the index rather than by time, because when somebody is
+        // searching the best answer matters more than the most recent one.
+        .sorted { left, right in
+            guard let matches else { return left.startedAt > right.startedAt }
+            let leftRank = matches.firstIndex(of: left.id) ?? Int.max
+            let rightRank = matches.firstIndex(of: right.id) ?? Int.max
+            return leftRank < rightRank
+        }
+    }
+
+    /// Asks the index, not the loaded rows.
+    ///
+    /// A single character is not a search — the index would match nearly
+    /// everything and the screen would flicker through the whole history on the
+    /// way to a real query.
+    private func runSearch(_ raw: String) async {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 2 else {
+            matches = nil
+            matchedPlaces = []
+            return
+        }
+        let store = model.store
+        let hits = await Task.detached(priority: .userInitiated) {
+            (try? store.search(text, limit: 200)) ?? []
+        }.value
+        matches = hits.filter { $0.kind == .memory }.map(\.recordId)
+        matchedPlaces = hits.filter { $0.kind == .place }.map(\.recordId)
     }
 
     private var stream: some View {
@@ -468,16 +568,28 @@ struct MemoriesView: View {
 
     // MARK: - What you're building
 
+    /// The project notes the index matched, or all of them when nothing is
+    /// being searched. A place whose note mentions the query is itself a result.
+    private var visibleProjects: [ProjectNote] {
+        guard matches != nil else { return projects }
+        return matchedPlaces.compactMap { path in
+            projects.first { $0.repositoryPath == path }
+        }
+    }
+
     private var building: some View {
         VStack(alignment: .leading, spacing: Journal.Space.l) {
             HStack(spacing: Journal.Space.m) {
                 Text("What you're building")
                     .font(.journalTitle(17))
                     .foregroundStyle(Journal.ink)
-                WashChip("\(projects.count) place\(projects.count == 1 ? "" : "s")", mono: true)
+                WashChip(
+                    "\(visibleProjects.count) place\(visibleProjects.count == 1 ? "" : "s")",
+                    mono: true
+                )
             }
             LazyVGrid(columns: Self.columns, alignment: .leading, spacing: Journal.Space.xl) {
-                ForEach(projects) { note in projectCard(note) }
+                ForEach(visibleProjects) { note in projectCard(note) }
             }
         }
     }

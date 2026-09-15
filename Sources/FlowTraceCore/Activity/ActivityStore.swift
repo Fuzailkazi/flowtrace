@@ -209,6 +209,10 @@ extension Store {
                 else { event.metadata.removeValue(forKey: key) }
             }
             try event.update(db)
+            // The place lands here rather than with the note, and the place is
+            // the indexed title — so a memory whose project arrives a moment
+            // later must be reindexed, or it stays findable only by its words.
+            try MemoryIndexing.index(db, event: event)
         }
     }
 
@@ -221,6 +225,9 @@ extension Store {
             event.note = trimmed.isEmpty ? nil : trimmed
             event.noteAt = trimmed.isEmpty ? nil : Date()
             try event.update(db)
+            // In the same transaction as the write, so a memory is findable the
+            // instant it exists and there is no window where the two disagree.
+            try MemoryIndexing.index(db, event: event)
             return event
         }
     }
@@ -231,6 +238,8 @@ extension Store {
     @discardableResult
     public func pruneAmbientActivity(olderThan days: Int = 2) throws -> Int {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        // No index cleanup: the filter below keeps anything with a note, and a
+        // row without one was never indexed.
         return try database.writer.write { db in
             try ActivityEvent
                 .filter(ActivityEvent.Columns.startedAt < cutoff)
@@ -242,6 +251,7 @@ extension Store {
 
     public func deleteActivity(id: String) throws {
         _ = try database.writer.write { db in
+            try SearchIndex.remove(db, kind: .memory, recordId: id)
             try ActivityEvent.deleteOne(db, key: id)
         }
     }
@@ -253,6 +263,15 @@ extension Store {
         let start = calendar.startOfDay(for: day)
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return }
         _ = try database.writer.write { db in
+            // The index rows go first, by id, because once the events are gone
+            // there is nothing left to say which index rows were theirs.
+            let doomed = try ActivityEvent
+                .filter(ActivityEvent.Columns.startedAt >= start)
+                .filter(ActivityEvent.Columns.startedAt < end)
+                .fetchAll(db)
+            for event in doomed {
+                try SearchIndex.remove(db, kind: .memory, recordId: event.id)
+            }
             try ActivityEvent
                 .filter(ActivityEvent.Columns.startedAt >= start)
                 .filter(ActivityEvent.Columns.startedAt < end)

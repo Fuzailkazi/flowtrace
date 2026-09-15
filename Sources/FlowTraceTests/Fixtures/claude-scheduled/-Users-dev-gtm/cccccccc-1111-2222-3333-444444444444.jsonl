@@ -1,0 +1,4 @@
+{"type": "user", "timestamp": "2026-07-01T09:00:00.000Z", "cwd": "/Users/dev/gtm", "gitBranch": "main", "message": {"role": "user", "content": [{"type": "text", "text": "rewrite the positioning section so it leads with the recovery story"}]}}
+{"type": "assistant", "timestamp": "2026-07-01T09:00:30.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Done."}]}}
+{"type": "user", "timestamp": "2026-07-14T03:00:00.000Z", "cwd": "/Users/dev/gtm", "gitBranch": "main", "message": {"role": "user", "content": [{"type": "text", "text": "<scheduled-task name=\"weekly-update\" file=\"/Users/dev/.claude/scheduled-tasks/weekly-update.md\">\nProduce the weekly update for this repository, summarising commits and open work.\n</scheduled-task>"}]}}
+{"type": "assistant", "timestamp": "2026-07-14T03:01:00.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Weekly update written."}]}}

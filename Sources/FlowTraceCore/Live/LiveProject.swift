@@ -33,19 +33,61 @@ public struct LiveProject: Identifiable, Sendable {
     }
 
     public var isLive: Bool {
-        agents.contains { $0.state != .idle } || !servers.isEmpty
+        agents.contains { $0.state.isActive } || !servers.isEmpty
     }
 
-    /// True when everything here has gone quiet but is still running — the case
-    /// worth surfacing, because it costs you memory and attention and you have
-    /// forgotten it exists.
+    /// The agents here FlowTrace was actually allowed to look at.
+    ///
+    /// Every verdict below is drawn from these and these only. A hidden agent
+    /// is not evidence of anything except that permission was withheld, and a
+    /// verdict built from one would be a statement about consent wearing the
+    /// colours of a statement about work.
+    public var readAgents: [LiveAgent] {
+        agents.filter { !$0.transcriptHidden }
+    }
+
+    /// True when everything here has been quiet long enough that you have very
+    /// likely forgotten it is running — the case worth surfacing, because it
+    /// costs you memory and attention and you no longer know it exists.
     public var isForgotten: Bool {
-        // Judged only on agents FlowTrace was allowed to look at. A hidden
-        // agent carries `.idle` because nothing is known about it, and counting
-        // that as "forgotten" would put a number in the header that is really a
-        // statement about permission.
-        let seen = agents.filter { !$0.transcriptHidden }
-        return !seen.isEmpty && seen.allSatisfy { $0.state == .idle }
+        let seen = readAgents
+        // Judged on when you were last here, not on when the agent last wrote.
+        // Under the old rule a project you abandoned in July stayed off this
+        // list indefinitely because a background agent kept touching its file.
+        return !seen.isEmpty && seen.allSatisfy { $0.attentionState() == .forgotten }
+    }
+
+    /// Something is still running here and you have not been back in a long
+    /// time. Worth saying out loud: it is both the most surprising row and the
+    /// one that costs the most to leave alone.
+    public var isRunningUnattended: Bool {
+        readAgents.contains(where: \.isRunningUnattended)
+    }
+
+    /// How long since you were last here, across every agent in this place.
+    public var awayFor: TimeInterval? {
+        let dates = readAgents.compactMap(\.lastHumanActivityAt)
+        guard let newest = dates.max() else { return nil }
+        return Date().timeIntervalSince(newest)
+    }
+
+    /// Quiet, but not yet long enough to claim you have forgotten it. Shown
+    /// differently, and never counted in the forgotten total.
+    public var isQuiet: Bool {
+        let seen = readAgents
+        guard !seen.isEmpty, !isForgotten else { return false }
+        return seen.allSatisfy { !$0.state.isActive }
+    }
+
+    /// The strongest thing happening here, which is what the row is sorted and
+    /// coloured by.
+    public var state: LiveAgent.State? {
+        let seen = readAgents
+        guard !seen.isEmpty else { return nil }
+        for candidate in LiveAgent.State.allCases where seen.contains(where: { $0.state == candidate }) {
+            return candidate
+        }
+        return nil
     }
 
     /// "4d idle", "just now" — the single word that says whether to care.
@@ -57,14 +99,16 @@ public struct LiveProject: Identifiable, Sendable {
         if !agents.isEmpty, agents.allSatisfy(\.transcriptHidden) {
             return "not reading transcripts"
         }
-        if let working = agents.first(where: { $0.state == .working }) {
-            return working.lastActivityLabel
+        if let unattended = readAgents.first(where: \.isRunningUnattended) {
+            // Both facts, because either alone is misleading: the agent is
+            // busy, and you have not been here for days.
+            return "running · you were last here \(unattended.awayLabel ?? "a while") ago"
         }
-        if let waiting = agents.first(where: { $0.state == .waiting }) {
-            return waiting.lastActivityLabel
+        if let active = agents.first(where: { $0.state.isActive }) {
+            return active.lastActivityLabel
         }
-        if let idle = agents.first {
-            return "\(idle.lastActivityLabel) · idle"
+        if let quiet = agents.first, let state = state {
+            return "\(quiet.lastActivityLabel) · \(state.label)"
         }
         return servers.isEmpty ? "" : "server only"
     }
@@ -88,6 +132,13 @@ public extension LiveState {
         var byPath: [String: LiveProject] = [:]
 
         for agent in agents {
+            // An agent started somewhere that is not a project — the
+            // filesystem root, the home folder, the Trash — is still running,
+            // and `unplacedAgents` still reports it. What it does not get is a
+            // row pretending to be a piece of work, because a place called `/`
+            // with a timestamp on it invites you to resume something that was
+            // never started.
+            guard agent.place?.isProject != false else { continue }
             let path = agent.projectRoot
             byPath[path, default: LiveProject(
                 path: path, name: agent.repositoryName, agents: [], servers: []
@@ -113,10 +164,22 @@ public extension LiveState {
                 return project
             }
             .sorted { left, right in
-                let leftLive = left.agents.contains { $0.state != .idle }
-                let rightLive = right.agents.contains { $0.state != .idle }
+                let leftLive = left.agents.contains { $0.state.isActive }
+                let rightLive = right.agents.contains { $0.state.isActive }
                 if leftLive != rightLive { return leftLive }
-                return (left.lastActivityAt ?? .distantPast) > (right.lastActivityAt ?? .distantPast)
+
+                // Among the places that are not moving, the forgotten ones come
+                // first. Sorting the quiet group by recency alone put the work
+                // somebody stepped away from twenty minutes ago above the work
+                // they abandoned four days ago — burying the exact thing the
+                // screen exists to surface under the thing they still remember.
+                if left.isForgotten != right.isForgotten { return left.isForgotten }
+
+                // Within a group, oldest first when forgotten (the longest
+                // abandoned is the most surprising) and newest first otherwise.
+                let leftAt = left.lastActivityAt ?? .distantPast
+                let rightAt = right.lastActivityAt ?? .distantPast
+                return left.isForgotten ? leftAt < rightAt : leftAt > rightAt
             }
     }
 }

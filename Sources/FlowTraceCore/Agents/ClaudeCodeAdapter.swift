@@ -89,6 +89,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
         var arc: [String] = []
         var startedAt: Date?
         var lastActivityAt: Date?
+        var lastHumanActivityAt: Date?
         var messageCount = 0
 
         while let line = reader.next() {
@@ -143,6 +144,14 @@ public struct ClaudeCodeAdapter: AgentAdapter {
                 guard !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty else { continue }
                 let text = redacted.text
 
+                // Dated only when a person plausibly typed it. Scheduled tasks
+                // and background notifications arrive in this slot and are long
+                // enough to pass every other test.
+                if !ClaudeTail.isMachineAuthored(text),
+                   let timestamp = object["timestamp"] as? String,
+                   let date = ISO8601.parse(timestamp) {
+                    lastHumanActivityAt = date
+                }
                 if firstPrompt == nil { firstPrompt = text }
                 lastPrompt = text
                 if AgentSession.isSubstantive(text) {
@@ -169,6 +178,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
             recentPrompts: arc,
             startedAt: startedAt,
             lastActivityAt: lastActivityAt ?? meta.modifiedAt,
+            lastHumanActivityAt: lastHumanActivityAt,
             filePath: path,
             messageCount: messageCount
         )

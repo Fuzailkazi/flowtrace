@@ -3,6 +3,21 @@ import GRDB
 
 public enum SearchKind: String, Codable, Sendable {
     case thread, tab, code, note
+    /// A note the user wrote on something they were doing. What the Memories
+    /// screen shows, and the thing people mean when they say "my notes".
+    case memory
+    /// What the user said they were building in a project.
+    case place
+
+    /// Whether the hit belongs to a work thread. The kinds that do navigate by
+    /// `threadId`; the kinds that do not navigate by `recordId`, which is an
+    /// activity id for a memory and a repository path for a place.
+    public var navigatesByThread: Bool {
+        switch self {
+        case .thread, .tab, .code, .note: true
+        case .memory, .place: false
+        }
+    }
 }
 
 public struct SearchHit: Identifiable, Hashable, Sendable {

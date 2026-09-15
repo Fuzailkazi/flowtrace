@@ -12,6 +12,9 @@ enum Route: Hashable {
     case memories
     /// One memory — a noted activity row — in full.
     case memory(String)
+    /// One place, opened to remember what was happening in it. The string is
+    /// the canonical repository path.
+    case place(String)
     case dashboard
     case status(ThreadStatus)
     case thread(String)
@@ -49,9 +52,12 @@ struct Toast: Identifiable, Equatable {
 struct ConsentSettings: Equatable {
     var claudeCode = false
     var codex = false
+    /// Off until asked for, like the other two. A source FlowTrace gained the
+    /// ability to read is not a source anybody agreed to.
+    var openCode = false
     var hasCompletedOnboarding = false
 
-    var anyEnabled: Bool { claudeCode || codex }
+    var anyEnabled: Bool { claudeCode || codex || openCode }
 
     static let defaultsKey = "flowtrace.consent"
 
@@ -61,6 +67,7 @@ struct ConsentSettings: Equatable {
         return ConsentSettings(
             claudeCode: raw["claudeCode"] as? Bool ?? false,
             codex: raw["codex"] as? Bool ?? false,
+            openCode: raw["openCode"] as? Bool ?? false,
             hasCompletedOnboarding: raw["hasCompletedOnboarding"] as? Bool ?? false
         )
     }
@@ -69,6 +76,7 @@ struct ConsentSettings: Equatable {
         UserDefaults.standard.set([
             "claudeCode": claudeCode,
             "codex": codex,
+            "openCode": openCode,
             "hasCompletedOnboarding": hasCompletedOnboarding,
         ], forKey: Self.defaultsKey)
     }
@@ -117,6 +125,40 @@ final class AppModel {
     /// of the things you agreed to is switched on.
     var mayObserve: Bool { consent.hasCompletedOnboarding }
 
+    /// The last reading of what is running, handed between screens.
+    ///
+    /// Read rather than retaken: the recovery screen is opened from a row the
+    /// user is looking at, and re-running `pgrep` to answer a question already
+    /// answered costs the best part of a second and can disagree with the row
+    /// they clicked.
+    var census: LiveCensus = .none
+
+    /// Records a census, unless observation is not permitted — in which case
+    /// there is nothing to record and anything held from before is dropped.
+    ///
+    /// The clearing half matters: a census taken while a source was switched on
+    /// is a reading of transcripts, and it must not outlive the permission that
+    /// allowed it.
+    func recordCensus(_ projects: [LiveProject]) {
+        census = .recorded(projects, permitted: mayObserve)
+    }
+
+    /// The place the main window is showing, when it is showing one.
+    ///
+    /// The one piece of context the window server cannot supply. Read from the
+    /// route rather than from a separate flag so there is nothing to keep in
+    /// step: if the screen is showing a place, this is that place.
+    var viewedPlace: (path: String, name: String)? {
+        guard case .place(let path) = route else { return nil }
+        let name = liveProject(at: path)?.name ?? SessionImporter.folderLabel(for: path)
+        return (FilePathCanon.canonical(path), name)
+    }
+
+    func liveProject(at path: String) -> LiveProject? {
+        guard mayObserve else { return nil }
+        return census.project(at: path)
+    }
+
     /// Which agents' transcripts may be opened right now: nothing until
     /// onboarding is finished, then exactly the sources switched on.
     var readableSources: AgentSources {
@@ -124,6 +166,7 @@ final class AppModel {
         var sources = AgentSources.none
         if consent.claudeCode { sources.insert(.claudeCode) }
         if consent.codex { sources.insert(.codex) }
+        if consent.openCode { sources.insert(.openCode) }
         return sources
     }
 
@@ -505,5 +548,33 @@ final class AppModel {
         } catch {
             toast = Toast(message: "\(context): \(error.localizedDescription)", isError: true)
         }
+    }
+}
+
+extension AppModel {
+    /// Fills in the one thing a snapshot of the screen cannot see.
+    ///
+    /// The capture shortcut is deliberately the same key everywhere — there is
+    /// one trigger, registered once, and this flow does not get its own. What
+    /// differs is only what "here" means at the moment it is pressed. Pressed
+    /// over another application, "here" is that application, and the snapshot
+    /// is already right. Pressed while reading a forgotten project inside
+    /// FlowTrace, "here" is that project, and without this the note would be
+    /// filed against FlowTrace itself.
+    ///
+    /// Nothing else about the capture changes: same panel, same pipeline, same
+    /// write. Only the answer to where the note belongs.
+    @MainActor
+    func contextualising(_ snapshot: FrontmostSnapshot) -> FrontmostSnapshot {
+        guard snapshot.bundleIdentifier == Bundle.main.bundleIdentifier,
+              let viewed = viewedPlace
+        else { return snapshot }
+
+        var contextual = snapshot
+        contextual.recalledPlace = Place(
+            root: viewed.path, name: viewed.name, editor: "FlowTrace"
+        )
+        Diagnostics.log("capture context: the place on screen — \(viewed.name)")
+        return contextual
     }
 }

@@ -15,7 +15,7 @@ struct Now: ParsableCommand {
         let projects = state.projects(notes: byPath)
 
         print("")
-        let live = projects.filter { $0.agents.contains { $0.state != .idle } }.count
+        let live = projects.filter { $0.agents.contains { $0.state.isActive } }.count
         print("  \(Term.bold("\(projects.count) place\(projects.count == 1 ? "" : "s")"))"
               + Term.dim("  \(state.agents.count) agents · \(state.servers.count) servers"
                          + (live > 0 ? " · \(live) active" : "")))
@@ -24,6 +24,7 @@ struct Now: ParsableCommand {
         for project in projects {
             let mark = project.agents.contains { $0.state == .working } ? Term.green("●")
                      : project.agents.contains { $0.state == .waiting } ? Term.cyan("●")
+                     : project.isForgotten ? Term.yellow("○")
                      : Term.dim("○")
 
             print("  \(mark) \(Term.bold(project.name))"

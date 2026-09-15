@@ -17,6 +17,7 @@ runAdapterTests(fixtures: fixtures)
 runEditorPlaceTests(fixtures: fixtures)
 runStoreTests()
 runSearchTests()
+runMemorySearchTests()
 runDetectorTests()
 runSummaryTests()
 runBrowserTests()
@@ -40,6 +41,21 @@ runHoldingsSizeTests()
 runRecorderPipelineTests()
 runPrivacyTests()
 runRedactionFixtureTests(fixtures: fixtures)
+runNowTests()
+runAssociationTests(fixtures: fixtures)
+runOpenCodeTests()
+runNowOrderingTests()
+runAttentionTests()
+runHandoffTests()
+runWorkspaceWindowTests()
+runScheduledTaskTests(fixtures: fixtures)
+runRecallTests()
+runContextualCaptureTests(
+    repositoryRoot: URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // FlowTraceTests
+        .deletingLastPathComponent()  // Sources
+        .deletingLastPathComponent()  // repository root
+)
 runConsentTests(fixtures: fixtures)
 
 

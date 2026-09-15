@@ -374,7 +374,7 @@ func runLiveProjectTests() {
     TestKit.suite("Now — grouped by place")
 
     func agent(
-        _ name: String, root: String, state: LiveAgent.State = .idle, minutesAgo: Double = 60
+        _ name: String, root: String, state: LiveAgent.State = .forgotten, minutesAgo: Double = 60
     ) -> LiveAgent {
         LiveAgent(
             pid: Int32.random(in: 1000...9999),
@@ -417,7 +417,7 @@ func runLiveProjectTests() {
 
     TestKit.test("what is moving sorts above what is forgotten") {
         let state = LiveState(agents: [
-            agent("stale", root: "/p/stale", state: .idle, minutesAgo: 5760),
+            agent("stale", root: "/p/stale", state: .forgotten, minutesAgo: 5760),
             agent("live", root: "/p/live", state: .working, minutesAgo: 1),
         ])
         expectEqual(state.projects().first?.name, "live", "active first")
@@ -425,7 +425,7 @@ func runLiveProjectTests() {
 
     // The case worth surfacing: quiet, but still running and still costing you.
     TestKit.test("a place whose agents have all gone quiet is forgotten") {
-        let forgotten = LiveState(agents: [agent("old", root: "/p/old", state: .idle)])
+        let forgotten = LiveState(agents: [agent("old", root: "/p/old", state: .forgotten)])
         expect(try unwrap(forgotten.projects().first).isForgotten)
 
         let busy = LiveState(agents: [agent("new", root: "/p/new", state: .working)])

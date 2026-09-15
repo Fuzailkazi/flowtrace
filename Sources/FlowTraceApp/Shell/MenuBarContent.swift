@@ -245,16 +245,10 @@ struct MenuBarContent: View {
     }
 
     private func activate() {
-        // Opening the workspace is a deliberate act, so FlowTrace takes on a
-        // normal application identity first — Dock tile, menu, ⌘-Tab — and only
-        // then puts the window on screen.
-        let lifecycle = NSApplication.shared.delegate as? AppLifecycle
-        lifecycle?.enterWorkspace()
-        // The main window is no longer created at launch, so raising an
-        // existing one is not enough — `openWindow` reuses it when it is open
-        // and builds it when it is not.
-        if lifecycle?.raiseMainWindow() != true {
-            openWindow(id: FlowTraceApp.mainWindowID)
-        }
+        // Not `NSApp.delegate`: SwiftUI puts its own delegate there and
+        // forwards to ours, so the cast returned nil and every call was quietly
+        // skipped. One call now, shared with the Dock tile and reopen, so there
+        // is a single story about what opening FlowTrace does.
+        AppLifecycle.shared?.openWorkspace()
     }
 }

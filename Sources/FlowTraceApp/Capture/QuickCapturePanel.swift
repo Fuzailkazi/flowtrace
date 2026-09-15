@@ -85,7 +85,7 @@ final class QuickCaptureController {
     }
 
     private func present() {
-        let snapshot = FrontmostSnapshot.capture()
+        let snapshot = model.contextualising(FrontmostSnapshot.capture())
         let previousApp = NSWorkspace.shared.frontmostApplication
 
         let view = QuickCaptureView(

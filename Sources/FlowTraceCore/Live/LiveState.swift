@@ -3,13 +3,34 @@ import Foundation
 /// A coding agent running on this machine right now.
 public struct LiveAgent: Identifiable, Hashable, Sendable {
     /// How long ago the transcript was last written to, turned into a verdict.
-    public enum State: String, Sendable {
+    ///
+    /// Four states rather than three because "idle" was doing two jobs. An
+    /// agent quiet for two hours and one quiet for four days were the same
+    /// word, so the genuinely forgotten work sat in a list next to work the
+    /// user had merely stepped away from, and the list stopped being worth
+    /// reading. See `ActivityThresholds` for the boundaries.
+    public enum State: String, Sendable, CaseIterable {
         /// Something was written in the last couple of minutes.
         case working
         /// Recently active, and almost certainly sitting waiting for you.
         case waiting
-        /// Nothing for hours or days. Still running, still holding resources.
-        case idle
+        /// Quiet for a while. Probably deliberate — lunch, a meeting, another task.
+        case quiet
+        /// Quiet for long enough that you have very likely forgotten it is here.
+        case forgotten
+
+        /// Something is happening, or just happened.
+        public var isActive: Bool { self == .working || self == .waiting }
+
+        /// The word shown to the user.
+        public var label: String {
+            switch self {
+            case .working: "working"
+            case .waiting: "waiting"
+            case .quiet: "quiet"
+            case .forgotten: "forgotten"
+            }
+        }
     }
 
     public var id: String { "\(agent.rawValue):\(pid)" }
@@ -23,11 +44,30 @@ public struct LiveAgent: Identifiable, Hashable, Sendable {
     public var branch: String?
 
     public var lastPrompt: String?
+    /// When the session file was last written. This is the agent's heartbeat,
+    /// not yours.
     public var lastActivityAt: Date?
+    /// When you last said something here.
+    ///
+    /// The distinction the product turns on. An agent left running unattended
+    /// keeps `lastActivityAt` fresh forever, so judging attention by it means
+    /// the work you actually walked away from never surfaces — which is the one
+    /// thing FlowTrace exists to do.
+    public var lastHumanActivityAt: Date?
     public var state: State
     public var sessionId: String?
     /// Your own note about this piece of work, if you've written one.
     public var note: String?
+
+    /// Where this is running, and whether that counts as a project at all.
+    /// Nil for agents built directly in tests.
+    public var place: WorkPlace?
+
+    /// False when the process is running but nothing on disk belongs to it, so
+    /// its age is unknown rather than recent. Kept separate from the state
+    /// because "waiting, activity unknown" and "waiting, wrote 40 seconds ago"
+    /// are different claims and only one of them is measured.
+    public var activityIsKnown: Bool = true
 
     /// True when FlowTrace found the process but has not been allowed to open
     /// its transcript. The row still says something honest — an agent is
@@ -37,9 +77,13 @@ public struct LiveAgent: Identifiable, Hashable, Sendable {
     public init(
         pid: Int32, agent: AgentName, workingDirectory: String, projectRoot: String,
         repositoryName: String, branch: String? = nil, lastPrompt: String? = nil,
-        lastActivityAt: Date? = nil, state: State, sessionId: String? = nil,
-        note: String? = nil, transcriptHidden: Bool = false
+        lastActivityAt: Date? = nil, lastHumanActivityAt: Date? = nil,
+        state: State, sessionId: String? = nil,
+        note: String? = nil, transcriptHidden: Bool = false,
+        place: WorkPlace? = nil, activityIsKnown: Bool = true
     ) {
+        self.place = place
+        self.activityIsKnown = activityIsKnown
         self.pid = pid
         self.agent = agent
         self.workingDirectory = workingDirectory
@@ -48,10 +92,36 @@ public struct LiveAgent: Identifiable, Hashable, Sendable {
         self.branch = branch
         self.lastPrompt = lastPrompt
         self.lastActivityAt = lastActivityAt
+        self.lastHumanActivityAt = lastHumanActivityAt
         self.state = state
         self.sessionId = sessionId
         self.note = note
         self.transcriptHidden = transcriptHidden
+    }
+
+    /// How long you have been away, judged by what you said rather than by
+    /// what the agent wrote.
+    ///
+    /// Falls back to the state the agent's heartbeat produced when no human
+    /// turn could be dated — for OpenCode, whose store does not distinguish
+    /// them, and for a session too long for the tail read to reach back into.
+    /// Unknown is not the same as recent, but guessing old would be worse.
+    public func attentionState(_ thresholds: ActivityThresholds = .default) -> State {
+        guard let lastHumanActivityAt else { return state }
+        return thresholds.state(forAge: Date().timeIntervalSince(lastHumanActivityAt))
+    }
+
+    /// True when the agent is still writing but you have not been here in a
+    /// long time. The most valuable row on the screen and the one the old model
+    /// could not express at all: it read as "working", because something was.
+    public var isRunningUnattended: Bool {
+        state.isActive && attentionState() == .forgotten
+    }
+
+    /// "19h ago", by the clock that matters.
+    public var awayLabel: String? {
+        guard let lastHumanActivityAt else { return nil }
+        return LiveState.duration(Date().timeIntervalSince(lastHumanActivityAt))
     }
 
     public var idleFor: TimeInterval {
@@ -62,7 +132,9 @@ public struct LiveAgent: Identifiable, Hashable, Sendable {
     /// "2m ago", "4d ago" — the honest signal, and usually the surprising one.
     public var lastActivityLabel: String {
         if transcriptHidden { return "not reading this one" }
-        guard let lastActivityAt else { return "unknown" }
+        guard let lastActivityAt else {
+            return activityIsKnown ? "unknown" : "running, no history yet"
+        }
         let seconds = Date().timeIntervalSince(lastActivityAt)
         if seconds < 90 { return "just now" }
         if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
@@ -113,16 +185,36 @@ public struct LiveState: Sendable {
         self.capturedAt = capturedAt
     }
 
-    public var idleAgents: [LiveAgent] { agents.filter { $0.state == .idle } }
-    public var activeAgents: [LiveAgent] { agents.filter { $0.state != .idle } }
+    /// Quiet long enough to be worth saying out loud. Hidden transcripts are
+    /// excluded: nothing is known about them, and "forgotten" would really be
+    /// a statement about permission.
+    public var forgottenAgents: [LiveAgent] {
+        // By attention, not by the agent's heartbeat — an agent left running
+        // unattended for a fortnight belongs here however busy it looks.
+        agents.filter { $0.attentionState() == .forgotten && !$0.transcriptHidden }
+    }
+
+    /// Running, but not anywhere that counts as a project. Reported as a count
+    /// rather than as rows: the honest claim is "three agents are running
+    /// outside your projects", not "you have a project called `/`".
+    public var unplacedAgents: [LiveAgent] {
+        agents.filter { $0.place?.isProject == false }
+    }
+
+    public var idleAgents: [LiveAgent] { agents.filter { !$0.state.isActive } }
+    public var activeAgents: [LiveAgent] { agents.filter { $0.state.isActive } }
 
     /// The sentence the header leads with, because it is usually a surprise.
     public var headline: String? {
         guard !agents.isEmpty else { return nil }
-        let idle = idleAgents.count
         let total = agents.count
-        if idle == 0 { return "\(total) agent\(total == 1 ? "" : "s") running" }
-        return "\(total) agent\(total == 1 ? "" : "s") running · \(idle) idle"
+        let running = "\(total) agent\(total == 1 ? "" : "s") running"
+        // The headline leads with what was forgotten, not with how many things
+        // are idle: idle is a count, forgotten is a question.
+        let forgotten = forgottenAgents.count
+        if forgotten > 0 { return running + " · \(forgotten) forgotten" }
+        let idle = idleAgents.count
+        return idle == 0 ? running : running + " · \(idle) idle"
     }
 }
 

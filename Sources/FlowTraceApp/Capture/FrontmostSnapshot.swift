@@ -35,6 +35,20 @@ struct FrontmostSnapshot: Equatable {
     /// the first of those may clear a place off a row.
     var placeChecked = false
 
+    /// The place the user was reading *inside FlowTrace* when they pressed the
+    /// key.
+    ///
+    /// Pressing the capture shortcut while looking at a forgotten project is
+    /// the one case where the frontmost application is the wrong answer. The
+    /// snapshot would say "FlowTrace", and the note — the whole point of which
+    /// is to record why that project was abandoned — would be filed against the
+    /// app the user was reading it in. This is that project, resolved from what
+    /// the screen is showing rather than from the window server.
+    ///
+    /// Everything downstream already understands places, so this needs no new
+    /// pipeline: it lands in `site` exactly where an editor's project lands.
+    var recalledPlace: Place?
+
     /// The app is a browser we know how to talk to, whether or not we managed to.
     var isBrowser: Bool {
         url != nil || automationDenied || matchedBrowser != nil
@@ -47,6 +61,9 @@ struct FrontmostSnapshot: Equatable {
 
     /// One line describing where the user is, for the top of the panel.
     var summary: String {
+        // The recalled place wins outright. The user is looking at it, and
+        // FlowTrace's own window title is not context, it is furniture.
+        if let recalledPlace { return recalledPlace.name }
         if let pageTitle, !pageTitle.isEmpty { return pageTitle }
         if let windowTitle, !windowTitle.isEmpty { return windowTitle }
         if let url { return url }
@@ -57,6 +74,9 @@ struct FrontmostSnapshot: Equatable {
     }
 
     var detail: String? {
+        // Said as what it is, rather than borrowed from the editor phrasing:
+        // nobody's editor reported this, the user opened it here.
+        if recalledPlace != nil { return "the project you were reading" }
         if let url, let host = URL(string: url)?.host() {
             return host.replacingOccurrences(of: "www.", with: "")
         }
@@ -106,13 +126,19 @@ struct FrontmostSnapshot: Equatable {
             appName: appName, bundleIdentifier: bundleIdentifier, pageTitle: pageTitle,
             url: url, openTabCount: openTabCount, isBrowser: isBrowser,
             automationDenied: automationDenied,
-            placeName: place?.name, placeRoot: place?.root,
+            // The recalled place takes precedence over anything an editor said,
+            // for the same reason it wins the summary: it is what the user is
+            // actually looking at.
+            placeName: (recalledPlace ?? place)?.name,
+            placeRoot: (recalledPlace ?? place)?.root,
             // Whether the app is one we could have asked at all. Without it a
             // capture with no place could not be told apart from a capture that
             // was never entitled to one, and every browser note would clear the
             // place an editor capture put on the shared open span.
             isEditor: EditorFamily.matching(bundleIdentifier: bundleIdentifier) != nil,
-            placeChecked: placeChecked
+            // A recalled place is already known, so nothing is still being
+            // waited on and a fast Return must not be treated as "not asked yet".
+            placeChecked: placeChecked || recalledPlace != nil
         )
     }
 

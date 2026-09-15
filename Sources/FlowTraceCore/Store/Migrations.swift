@@ -207,6 +207,19 @@ enum Migrations {
             try Store.redactStoredText(db)
         }
 
+        // The index was built around work threads in v1 and never followed the
+        // product. What a person writes today is a note on something they were
+        // doing, or a note on a project, and neither had ever been indexed — so
+        // searching for a sentence you typed yesterday found nothing, silently.
+        //
+        // Indexing only new notes would leave every memory written before the
+        // upgrade unfindable, which for somebody with months of them is
+        // indistinguishable from no fix at all. So everything already on disk
+        // is indexed here, once.
+        migrator.registerMigration("v7.indexMemories") { db in
+            try MemoryIndexing.indexEverything(db)
+        }
+
         return migrator
     }
 }

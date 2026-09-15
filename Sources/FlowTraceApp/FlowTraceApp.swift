@@ -40,7 +40,12 @@ struct FlowTraceApp: App {
     static let mainWindowID = "flowtrace.main"
 
     var body: some Scene {
-        WindowGroup(id: FlowTraceApp.mainWindowID) {
+        // `Window`, not `WindowGroup`. A group exists to make many windows, and
+        // `openWindow(id:)` on one dutifully builds another every time it is
+        // called — which produced a second workspace on the second click. There
+        // is exactly one FlowTrace workspace, so the scene that says so is the
+        // one to use: `openWindow` re-shows the window it already has.
+        Window("FlowTrace", id: FlowTraceApp.mainWindowID) {
             Group {
                 switch launch {
                 case .ready(let model):
@@ -64,7 +69,10 @@ struct FlowTraceApp: App {
                 Button("Quit FlowTrace") { NSApplication.shared.terminate(nil) }
             }
         } label: {
-            Image(nsImage: BrandMark.menuBarImage())
+            // The label lives for as long as the app does, which makes it the
+            // one place that can hand `openWindow` to the delegate. Everything
+            // else — the popover, the workspace itself — comes and goes.
+            MenuBarLabel()
         }
         .menuBarExtraStyle(.window)
 
@@ -73,6 +81,20 @@ struct FlowTraceApp: App {
                 SettingsView(model: model).frame(width: 560, height: 520)
             }
         }
+    }
+}
+
+/// The menu-bar item's face, and the app's only permanently live view.
+private struct MenuBarLabel: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(nsImage: BrandMark.menuBarImage())
+            .task {
+                AppLifecycle.shared?.openWindowAction = {
+                    openWindow(id: FlowTraceApp.mainWindowID)
+                }
+            }
     }
 }
 
@@ -146,7 +168,24 @@ struct RootView: View {
                         model.route = .memory(newest.id)
                     }
                 default:
-                    if requested.hasPrefix("memory:") {
+                    if requested.hasPrefix("place:") {
+                        var path = String(requested.dropFirst("place:".count))
+                        // `place:<path>+capture` opens the place and then
+                        // summons the panel, as pressing the key there would.
+                        // The only way to exercise the contextual capture
+                        // without a trusted process to post the keystroke.
+                        let thenCapture = path.hasSuffix("+capture")
+                        if thenCapture { path = String(path.dropLast("+capture".count)) }
+                        model.route = .place(path)
+                        if thenCapture {
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .seconds(1.5))
+                                NotificationCenter.default.post(
+                                    name: .flowtraceQuickCapture, object: nil
+                                )
+                            }
+                        }
+                    } else if requested.hasPrefix("memory:") {
                         model.route = .memory(String(requested.dropFirst("memory:".count)))
                     }
                 }
@@ -265,6 +304,8 @@ struct DetailPane: View {
                 MemoriesView(model: model)
             case .memory(let id):
                 MemoryDetailView(model: model, eventId: id)
+            case .place(let path):
+                PlaceRecallView(model: model, path: path)
             case .dashboard:
                 DashboardView(model: model)
             case .status(let status):

@@ -9,16 +9,31 @@ import Foundation
 public struct LiveStateReader: Sendable {
     private let git: GitProbe
     private let claudeRoot: URL
+    private let thresholds: ActivityThresholds
+    private let codexRoot: URL?
+    private let openCodeDatabase: URL?
 
-    /// Anything written to more recently than this is actively working.
-    private let workingWindow: TimeInterval = 120
-    /// Beyond this, it is not waiting for you — it has been forgotten.
-    private let waitingWindow: TimeInterval = 3600
-
-    public init(git: GitProbe = GitProbe(), claudeRoot: URL? = nil) {
+    public init(
+        git: GitProbe = GitProbe(),
+        claudeRoot: URL? = nil,
+        codexRoot: URL? = nil,
+        openCodeDatabase: URL? = nil,
+        thresholds: ActivityThresholds = .default
+    ) {
         self.git = git
         self.claudeRoot = claudeRoot ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/projects", isDirectory: true)
+        self.codexRoot = codexRoot
+        self.openCodeDatabase = openCodeDatabase
+        self.thresholds = thresholds
+    }
+
+    /// Where each agent's history lives. One per reading, so the Codex session
+    /// directory is walked at most once and only when a Codex process exists.
+    private func makeIndex() -> TranscriptIndex {
+        TranscriptIndex(
+            claudeRoot: claudeRoot, codexRoot: codexRoot, openCodeDatabase: openCodeDatabase
+        )
     }
 
     /// What is running, and — for the agents whose transcripts may be read —
@@ -83,33 +98,38 @@ public struct LiveStateReader: Sendable {
 
     public func readAgents(transcripts: AgentSources = .all) -> [LiveAgent] {
         let processes = runningProcesses(named: ["claude", "codex", "opencode"])
+        let index = makeIndex()
         var agents: [LiveAgent] = []
         // Several agents usually sit in the same handful of repositories, and
         // each resolution is a subprocess.
-        var topLevels: [String: String] = [:]
+        var places: [String: WorkPlace] = [:]
 
         for process in processes {
-            let top: String?
-            if let memo = topLevels[process.workingDirectory] {
-                top = memo
+            let place: WorkPlace
+            if let memo = places[process.workingDirectory] {
+                place = memo
             } else {
-                top = git.topLevel(of: process.workingDirectory)
-                if let top { topLevels[process.workingDirectory] = top }
+                place = WorkPlace.resolve(
+                    workingDirectory: process.workingDirectory,
+                    repositoryRoot: git.topLevel(of: process.workingDirectory)
+                )
+                places[process.workingDirectory] = place
             }
             agents.append(agent(
-                for: process, root: top ?? process.workingDirectory, transcripts: transcripts
+                for: process, place: place, transcripts: transcripts, index: index
             ))
         }
 
-
-        // Several processes share one working directory — the CLI spawns helpers —
-        // so collapse to one entry per place you are actually working.
+        // Several processes share one working directory — the CLI spawns
+        // helpers — so collapse to one entry per place you are actually
+        // working. Keyed on the resolved place rather than the raw directory,
+        // so an agent in `repo` and another in `repo/api` are one row for the
+        // repository rather than two rows that look like two pieces of work.
         var seen: Set<String> = []
         return agents
             .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
-            .filter { seen.insert("\($0.agent.rawValue):\($0.workingDirectory)").inserted }
+            .filter { seen.insert("\($0.agent.rawValue):\($0.projectRoot)").inserted }
     }
-
 
     /// Resolves one running process into what is known about it.
     ///
@@ -118,6 +138,20 @@ public struct LiveStateReader: Sendable {
     /// top-levels across processes.
     public func agent(
         for process: RunningProcess, root: String, transcripts: AgentSources
+    ) -> LiveAgent {
+        agent(
+            for: process,
+            place: WorkPlace.resolve(workingDirectory: process.workingDirectory, repositoryRoot: root),
+            transcripts: transcripts,
+            index: makeIndex()
+        )
+    }
+
+    func agent(
+        for process: RunningProcess,
+        place: WorkPlace,
+        transcripts: AgentSources,
+        index: TranscriptIndex
     ) -> LiveAgent {
         let agent: AgentName
         if process.command.contains("codex") {
@@ -132,9 +166,10 @@ public struct LiveStateReader: Sendable {
             pid: process.pid,
             agent: agent,
             workingDirectory: process.workingDirectory,
-            projectRoot: FilePathCanon.canonical(root),
-            repositoryName: SessionImporter.folderLabel(for: root),
-            state: .idle
+            projectRoot: place.path,
+            repositoryName: place.name,
+            state: .quiet,
+            place: place
         )
 
         guard transcripts.allows(agent) else {
@@ -144,37 +179,29 @@ public struct LiveStateReader: Sendable {
             return live
         }
 
-        if let transcript = newestTranscript(for: process.workingDirectory) {
-            live.lastActivityAt = transcript.modifiedAt
-            live.sessionId = (transcript.path as NSString)
-                .lastPathComponent
-                .replacingOccurrences(of: ".jsonl", with: "")
-
-            let age = Date().timeIntervalSince(transcript.modifiedAt)
-            live.state = age < workingWindow ? .working
-                   : age < waitingWindow ? .waiting
-                   : .idle
-
-            if agent != .openCode, let prompt = lastPrompt(in: transcript.path) {
-                // A dragged file pastes its path as the prompt; the sentence
-                // after it is the part worth showing.
-                let stripped = AgentSession.withoutLeadingPath(prompt)
-                // Prompts are free text and routinely contain pasted keys.
-                let redacted = Redaction.redact(stripped.isEmpty ? prompt : stripped)
-                if !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty {
-                live.lastPrompt = AgentSession.condense(redacted.text, limit: 90)
-                }
-            }
-        } else {
-            // The process is running right now (pgrep found it) but has no
-            // readable transcript — true for OpenCode, which keeps no
-            // Claude-style session store. Claiming `.idle` would file it as
-            // "forgotten for days"; `.waiting` says honestly: running,
-            // sitting waiting for you, activity unknown.
+        // The repository root is used for the lookup whether or not the place
+        // is one FlowTrace will show. Whether work is worth listing and where
+        // its history lives are separate questions, and conflating them meant
+        // an agent in a rejected place also lost its history.
+        guard let entry = index.entry(
+            for: agent,
+            workingDirectory: process.workingDirectory,
+            repositoryRoot: place.path
+        ) else {
+            // The process is running right now (pgrep found it) but nothing on
+            // disk belongs to it. Claiming `.forgotten` would file a session
+            // started ten seconds ago as days-old work; `.waiting` says
+            // honestly: running, sitting there, activity unknown.
             live.state = .waiting
+            live.activityIsKnown = false
+            return live
         }
 
-
+        live.lastActivityAt = entry.modifiedAt
+        live.lastHumanActivityAt = entry.lastHumanAt
+        live.sessionId = entry.sessionId
+        live.state = thresholds.state(forAge: Date().timeIntervalSince(entry.modifiedAt))
+        live.lastPrompt = entry.lastPrompt
         return live
     }
 
@@ -217,9 +244,14 @@ public struct LiveStateReader: Sendable {
             guard let cwd = cwds[server.pid], cwd.hasPrefix(home) else { return nil }
             var server = server
             server.workingDirectory = cwd
-            let root = git.topLevel(of: cwd) ?? cwd
-            server.projectRoot = FilePathCanon.canonical(root)
-            server.projectName = SessionImporter.folderLabel(for: root)
+            let place = WorkPlace.resolve(
+                workingDirectory: cwd, repositoryRoot: git.topLevel(of: cwd)
+            )
+            // A server started outside any project has nowhere to be grouped,
+            // and inventing a place called `/` for it helps nobody.
+            guard place.isProject else { return nil }
+            server.projectRoot = place.path
+            server.projectName = place.name
             return server
         }
         .sorted { $0.port < $1.port }
@@ -284,75 +316,5 @@ public struct LiveStateReader: Sendable {
             if line.first == "n", value.hasPrefix("/") { directories[pid] = value }
         }
         return directories
-    }
-
-    // MARK: - Transcripts
-
-    private struct Transcript {
-        var path: String
-        var modifiedAt: Date
-    }
-
-    private func newestTranscript(for workingDirectory: String) -> Transcript? {
-        let slug = ClaudeCodeAdapter.projectSlug(for: workingDirectory)
-        let directory = claudeRoot.appendingPathComponent(slug)
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.contentModificationDateKey]
-        ) else { return nil }
-
-        return files
-            .filter { $0.pathExtension == "jsonl" }
-            .compactMap { url -> Transcript? in
-                guard let meta = FileMeta.stat(url.path) else { return nil }
-                return Transcript(path: url.path, modifiedAt: meta.modifiedAt)
-            }
-            .max { $0.modifiedAt < $1.modifiedAt }
-    }
-
-    /// The last thing you typed, read from the tail of the transcript.
-    ///
-    /// Only the final stretch of the file is read. Transcripts run to megabytes
-    /// and this refreshes continuously, so reading each one end-to-end cost two
-    /// seconds across eleven agents — most of it spent parsing history nobody
-    /// asked for.
-    private func lastPrompt(in path: String) -> String? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
-
-        // Widening until a prompt is found: a long agent turn can put megabytes of
-        // tool output between you and the last thing you said, and 256KB reached
-        // back past the prompt in most live sessions. Reading the whole file was
-        // the alternative, and that cost two seconds across eleven agents.
-        let size = (try? handle.seekToEnd()).map(Int.init) ?? 0
-        var last: String?
-
-        for tailBytes in [512 * 1024, 4 * 1024 * 1024] {
-            try? handle.seek(toOffset: UInt64(max(0, size - tailBytes)))
-            guard let data = try? handle.readToEnd() else { break }
-            last = Self.lastPrompt(inTail: data)
-            if last != nil || tailBytes >= size { break }
-        }
-        return last
-    }
-
-    /// Scans a tail of transcript for the last thing the user typed.
-    ///
-    /// The first line is very likely truncated mid-JSON; parsing simply fails on
-    /// it and it is skipped, which is exactly the behaviour wanted.
-    private static func lastPrompt(inTail data: Data) -> String? {
-        var last: String?
-        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
-            let line = String(line)
-            guard line.contains("\"type\":\"user\"") else { continue }
-            guard let data = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  object["isSidechain"] as? Bool != true,
-                  object["isMeta"] as? Bool != true,
-                  let text = ClaudeCodeAdapter.userText(from: object["message"]),
-                  AgentSession.isSubstantive(text)
-            else { continue }
-            last = text
-        }
-        return last
     }
 }

@@ -36,8 +36,16 @@ public struct BriefBuilder: Sendable {
 
     /// Returns nil when there is nothing worth saying — see the silence rules in
     /// `BriefConfig`. Silence is the common case and the correct one.
+    /// `sources` is the permission, passed as a value like everywhere else.
+    ///
+    /// It defaults to `.all` for the command line, which runs in its own
+    /// process where the app's stored consent is not visible. The app always
+    /// passes its own set: a brief assembled for the recovery screen must not
+    /// open a transcript the user has not agreed to, and before this parameter
+    /// existed it would have opened both.
     public func build(
         repositoryPath: String,
+        sources: AgentSources = .all,
         config: BriefConfig = BriefConfig(),
         cache: SessionCache? = nil
     ) -> ResumeBrief? {
@@ -47,10 +55,23 @@ public struct BriefBuilder: Sendable {
         guard !config.noisePathFragments.contains(where: { lowered.contains($0.lowercased()) })
         else { return nil }
 
-        let sessions = recentSessions(for: state.topLevel, config: config, cache: cache)
-        let lastActivity = [state.headDate, sessions.last?.lastActivityAt]
+        let sessions = recentSessions(
+            for: state.topLevel, sources: sources, config: config, cache: cache
+        )
+        // A commit is something a person did, so `headDate` counts as human
+        // evidence; a session's `lastActivityAt` does not, because it moves
+        // whenever the agent writes.
+        let humanActivity = ([state.headDate] + sessions.map(\.lastHumanActivityAt))
             .compactMap { $0 }
             .max()
+        let anyActivity = [state.headDate, sessions.last?.lastActivityAt]
+            .compactMap { $0 }
+            .max()
+
+        // The human reading is preferred when there is one. Falling back to the
+        // agent's clock keeps the brief useful, and `elapsedIsHuman` carries the
+        // difference into the wording rather than hiding it.
+        let lastActivity = humanActivity ?? anyActivity
 
         guard let lastActivity else { return nil }
 
@@ -85,7 +106,8 @@ public struct BriefBuilder: Sendable {
             lastCommitSubject: state.lastCommitSubject,
             recentPrompts: prompts,
             sessionTitle: sessions.last(where: { !($0.title ?? "").isEmpty })?.title,
-            redactionCount: redactions
+            redactionCount: redactions,
+            elapsedIsHuman: humanActivity != nil
         )
     }
 
@@ -96,15 +118,16 @@ public struct BriefBuilder: Sendable {
     /// The directory-name filter narrows the candidates cheaply; the git top-level
     /// check is what makes the result correct, since a slug can collide.
     private func recentSessions(
-        for repositoryPath: String, config: BriefConfig, cache: SessionCache?
+        for repositoryPath: String, sources: AgentSources,
+        config: BriefConfig, cache: SessionCache?
     ) -> [AgentSession] {
         var found: [AgentSession] = []
 
-        if claude.isAvailable,
+        if sources.allows(.claudeCode), claude.isAvailable,
            let scoped = try? claude.discoverSessions(inRepository: repositoryPath, cache: cache) {
             found.append(contentsOf: scoped)
         }
-        if codex.isAvailable,
+        if sources.allows(.codex), codex.isAvailable,
            let recent = try? codex.discoverSessions(
                modifiedWithin: config.codexLookbackDays, cache: cache
            ) {

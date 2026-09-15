@@ -18,19 +18,23 @@ public struct AgentSources: OptionSet, Sendable, Equatable {
 
     public static let claudeCode = AgentSources(rawValue: 1 << 0)
     public static let codex = AgentSources(rawValue: 1 << 1)
+    public static let openCode = AgentSources(rawValue: 1 << 2)
 
-    public static let all: AgentSources = [.claudeCode, .codex]
+    public static let all: AgentSources = [.claudeCode, .codex, .openCode]
     public static let none: AgentSources = []
 
     /// Whether this set allows reading a given agent's transcripts.
     ///
-    /// False for every agent FlowTrace cannot read anyway — Cursor, OpenCode,
-    /// Gemini CLI — so a caller never has to special-case them.
+    /// False for every agent FlowTrace cannot read anyway — Cursor, Gemini CLI
+    /// — so a caller never has to special-case them. Switching a source on for
+    /// an agent FlowTrace has no reader for would be a promise nothing could
+    /// keep.
     public func allows(_ agent: AgentName) -> Bool {
         switch agent {
         case .claudeCode: contains(.claudeCode)
         case .codex: contains(.codex)
-        case .cursor, .openCode, .geminiCLI, .other: false
+        case .openCode: contains(.openCode)
+        case .cursor, .geminiCLI, .other: false
         }
     }
 }

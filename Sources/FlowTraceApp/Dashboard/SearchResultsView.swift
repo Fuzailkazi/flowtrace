@@ -59,7 +59,14 @@ struct SearchHitRow: View {
         .contentShape(Rectangle())
         .onTapGesture {
             model.searchText = ""
-            model.route = .thread(hit.threadId)
+            // A memory and a place belong to no thread, so the navigation
+            // target is the record itself. Routing everything by `threadId`
+            // sent them to an empty thread screen.
+            switch hit.kind {
+            case .memory: model.route = .memory(hit.recordId)
+            case .place: model.route = .place(hit.recordId)
+            case .thread, .tab, .code, .note: model.route = .thread(hit.threadId)
+            }
         }
     }
 
@@ -69,6 +76,8 @@ struct SearchHitRow: View {
         case .tab: "safari"
         case .code: "folder"
         case .note: "note.text"
+        case .memory: "text.quote"
+        case .place: "folder.badge.questionmark"
         }
     }
 }

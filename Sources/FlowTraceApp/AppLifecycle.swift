@@ -21,6 +21,32 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     /// which gives no opportunity to pass anything in.
     @MainActor static var model: AppModel?
 
+    /// The live delegate instance.
+    ///
+    /// `NSApp.delegate` is **not** this object. SwiftUI's
+    /// `NSApplicationDelegateAdaptor` installs its own `AppDelegate` and
+    /// forwards the callbacks on, so `NSApp.delegate as? AppLifecycle` returns
+    /// nil — silently, at every call site, with optional chaining turning the
+    /// failure into a no-op rather than a crash. That is why "Open FlowTrace"
+    /// did nothing: the activation-policy change and the activation were both
+    /// skipped, and the log had nothing to show because neither line ever ran.
+    ///
+    /// Set from a callback that does arrive on this instance, so it is the
+    /// object itself rather than a guess about what AppKit is holding.
+    @MainActor private(set) static var shared: AppLifecycle?
+
+    /// SwiftUI's `openWindow`, captured from a view that is always alive.
+    ///
+    /// Only SwiftUI can build a `WindowGroup` window, and only a live view can
+    /// reach `openWindow`. The menu-bar popover is not alive until it is
+    /// opened, and the workspace is not alive when it is closed, so without
+    /// this there is no moment at which the delegate can open the workspace on
+    /// its own — which is why clicking the Dock tile with no window did nothing.
+    ///
+    /// Held from the menu-bar item's label, which exists for as long as the app
+    /// does.
+    @MainActor var openWindowAction: (() -> Void)?
+
     /// Everything that has to outlive the main window.
     ///
     /// These used to hang off `RootView`, the `WindowGroup`'s root view, which
@@ -36,6 +62,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
+            Self.shared = self
             guard let model = Self.model else { return }
             // FlowTrace starts as what it is: a key and a menu-bar item. The
             // main window is a place to go, not the thing that opens — except
@@ -86,25 +113,80 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The `WindowGroup` window, identified by what it is rather than by class:
-    /// the panel refuses main status, the popover and status item are not
-    /// closable windows, and Settings carries its own identifier.
+    /// The workspace window, identified by name rather than by shape.
+    ///
+    /// It used to be "anything that can become main and is not the capture
+    /// panel or Settings", which is a description of what the workspace happens
+    /// to be rather than of what it is. SwiftUI stamps the window group's own
+    /// identifier onto it — `flowtrace.main-AppWindow-1` — so the test can name
+    /// the window instead of guessing at it, and nothing transient can be
+    /// mistaken for the workspace by the close watcher.
     @MainActor
-    private static func isMainWindow(_ window: NSWindow) -> Bool {
-        guard window.canBecomeMain, !(window is QuickCapturePanel) else { return false }
-        return window.identifier?.rawValue.hasPrefix("com_apple_SwiftUI_Settings") != true
+    static func isMainWindow(_ window: NSWindow) -> Bool {
+        window.identifier?.rawValue.hasPrefix(FlowTraceApp.mainWindowID) == true
     }
 
-    /// Raises the main window if one exists. Creating one is SwiftUI's job —
-    /// the menu bar uses `openWindow(id:)`, which reuses this window when it is
-    /// already open and builds it when it is not.
+    /// The workspace window, if one is open.
+    @MainActor
+    var mainWindow: NSWindow? {
+        NSApp.windows.first(where: { Self.isMainWindow($0) })
+    }
+
+    /// Raises the workspace window if one exists.
     @MainActor
     @discardableResult
     func raiseMainWindow() -> Bool {
-        guard let existing = NSApp.windows.first(where: { Self.isMainWindow($0) })
-        else { return false }
+        guard let existing = mainWindow else { return false }
         existing.makeKeyAndOrderFront(nil)
         return true
+    }
+
+    /// Open the workspace, from anywhere.
+    ///
+    /// One path for every way in — the menu item, the Dock tile, a reopen — so
+    /// there is one story about what "open FlowTrace" does. Raises what is
+    /// already there rather than building a second window.
+    @MainActor
+    func openWorkspace() {
+        if !raiseMainWindow() { openWindowAction?() }
+        revealMainWindow()
+    }
+
+    /// True while a reveal is still waiting for SwiftUI to produce the window,
+    /// so a second click a moment later waits for the same window rather than
+    /// asking for another one.
+    @MainActor private var revealing = false
+
+    /// Brings the workspace forward once SwiftUI has built it.
+    ///
+    /// `openWindow` returns before the window exists, so activating and
+    /// ordering front in the same turn acts on nothing. This waits for the
+    /// window to appear and then puts it in front — which is also what makes
+    /// the Dock-policy change take visible effect.
+    @MainActor
+    func revealMainWindow(attempt: Int = 0) {
+        if attempt == 0 {
+            guard !revealing else { return }
+            revealing = true
+        }
+        if let window = mainWindow {
+            revealing = false
+            enterWorkspace()
+            window.makeKeyAndOrderFront(nil)
+            Diagnostics.log("workspace revealed")
+            return
+        }
+        // Roughly a second in total. If SwiftUI has not produced a window by
+        // then it is not going to, and giving up is better than a timer that
+        // outlives the gesture.
+        guard attempt < 20 else {
+            revealing = false
+            Diagnostics.log("workspace never appeared after openWindow")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            MainActor.assumeIsolated { self?.revealMainWindow(attempt: attempt + 1) }
+        }
     }
 
     // MARK: - Dock presence
@@ -143,6 +225,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
             guard let window = notification.object as? NSWindow,
                   MainActor.assumeIsolated({ Self.isMainWindow(window) })
             else { return }
+            Diagnostics.log("workspace window closing")
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { Self.leaveWorkspaceIfEmpty() }
             }
@@ -258,10 +341,11 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
         _ sender: NSApplication, hasVisibleWindows: Bool
     ) -> Bool {
         MainActor.assumeIsolated {
-            guard !isCapturing, !hasVisibleWindows else { return true }
-            // Clicking the Dock tile is the same deliberate act as choosing
-            // Open FlowTrace, so it gets the same treatment.
-            if raiseMainWindow() { enterWorkspace() }
+            guard !isCapturing else { return true }
+            // Clicking the Dock tile, or launching an already-running FlowTrace,
+            // is the same deliberate act as choosing Open FlowTrace — so it is
+            // the same call, and it works whether or not a window exists.
+            openWorkspace()
             return true
         }
     }

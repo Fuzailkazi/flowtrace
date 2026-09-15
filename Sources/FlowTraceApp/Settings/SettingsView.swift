@@ -71,10 +71,15 @@ struct SettingsView: View {
             source("Claude Code", isOn: $model.consent.claudeCode,
                    adapter: ClaudeCodeAdapter())
             source("Codex CLI", isOn: $model.consent.codex, adapter: CodexAdapter())
+            source(
+                "OpenCode", isOn: $model.consent.openCode,
+                paths: [OpenCodeStore.defaultDatabase.path],
+                available: OpenCodeStore.isInstalled
+            )
 
             Card {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("Cursor, OpenCode and Gemini CLI")
+                    Text("Cursor and Gemini CLI")
                         .font(.system(size: 12, weight: .medium))
                     Text("Their local session stores are either incomplete or opaque, so "
                          + "FlowTrace doesn't guess at them. Attach those sessions by hand "
@@ -104,6 +109,38 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// The same row, for a source that is read live rather than imported as
+    /// sessions. OpenCode keeps its history in a SQLite store, so there is a
+    /// file to name and a switch to offer, but no adapter behind it.
+    private func source(
+        _ title: String, isOn: Binding<Bool>, paths: [String], available: Bool
+    ) -> some View {
+        Card {
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Toggle("", isOn: isOn)
+                    .labelsHidden()
+                    .disabled(!available)
+                    .onChange(of: isOn.wrappedValue) { _, _ in
+                        model.consent.save()
+                        model.refresh()
+                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: Theme.Space.xs) {
+                        Text(title).font(.system(size: 13, weight: .medium))
+                        if !available { Chip(text: "not installed", color: .secondary) }
+                    }
+                    ForEach(paths, id: \.self) { path in
+                        Text(path.abbreviatingHome)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer()
+            }
+        }
+        .opacity(available ? 1 : 0.55)
     }
 
     private func source(_ title: String, isOn: Binding<Bool>, adapter: any AgentAdapter) -> some View {
@@ -442,7 +479,10 @@ struct SettingsView: View {
     @ViewBuilder
     private var chordControls: some View {
         HStack(alignment: .top, spacing: Theme.Space.m) {
-            Text("⌥Space by default. Needs no permission and can't fire by accident. "
+            // Read from the default rather than spelled out, so this sentence
+            // cannot drift from the key that actually ships.
+            Text("\(HotKeyShortcut.default.displayString) by default. "
+                 + "Needs no permission and can't fire by accident. "
                  + "If pressing it does nothing, another app has claimed it — "
                  + "macOS gives the key to whoever asked first and tells neither of you.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)

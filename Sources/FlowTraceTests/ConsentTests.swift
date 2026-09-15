@@ -16,12 +16,15 @@ func runConsentTests(fixtures: URL) {
         }
     }
 
-    TestKit.test("only the two FlowTrace can read are ever allowed") {
+    TestKit.test("only the agents FlowTrace can read are ever allowed") {
         expect(AgentSources.all.allows(.claudeCode))
         expect(AgentSources.all.allows(.codex))
-        // There is no adapter for these, so "allowed" would be a promise
+        // OpenCode joined them once there was something to read: it keeps its
+        // sessions in a SQLite store with a directory column.
+        expect(AgentSources.all.allows(.openCode))
+        // There is no reader for these, so "allowed" would be a promise
         // nothing could keep.
-        for agent in [AgentName.cursor, .openCode, .geminiCLI, .other] {
+        for agent in [AgentName.cursor, .geminiCLI, .other] {
             expect(!AgentSources.all.allows(agent), "\(agent.label)")
         }
     }
@@ -155,7 +158,7 @@ func runConsentTests(fixtures: URL) {
     TestKit.test("a place whose agents are all unread is never called forgotten") {
         let project = LiveProject(
             path: "/tmp/acme", name: "acme",
-            agents: [agent("acme", state: .idle, hidden: true)], servers: []
+            agents: [agent("acme", state: .forgotten, hidden: true)], servers: []
         )
         expect(!project.isForgotten)
         expectEqual(project.statusLabel, "not reading transcripts")
@@ -164,14 +167,14 @@ func runConsentTests(fixtures: URL) {
     TestKit.test("a place is judged on the agents that were read") {
         let unreadPlusIdle = LiveProject(
             path: "/tmp/a", name: "a",
-            agents: [agent("a", state: .idle, hidden: true), agent("a", state: .idle)],
+            agents: [agent("a", state: .forgotten, hidden: true), agent("a", state: .forgotten)],
             servers: []
         )
         expect(unreadPlusIdle.isForgotten, "the one that was read has gone quiet")
 
         let unreadPlusWorking = LiveProject(
             path: "/tmp/b", name: "b",
-            agents: [agent("b", state: .idle, hidden: true), agent("b", state: .working)],
+            agents: [agent("b", state: .forgotten, hidden: true), agent("b", state: .working)],
             servers: []
         )
         expect(!unreadPlusWorking.isForgotten, "something there is moving")
