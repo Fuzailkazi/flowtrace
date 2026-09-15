@@ -295,6 +295,7 @@ struct PlaceRecallView: View {
             } label: {
                 Label("Open in Finder", systemImage: "folder")
             }
+            .buttonStyle(.borderedProminent)
 
             if let brief = recall.brief {
                 // The same text the command line hands an agent. Copying it is
@@ -310,6 +311,7 @@ struct PlaceRecallView: View {
             Spacer()
         }
         .font(.caption())
+        .padding(.top, Journal.Space.s)
     }
 
     // MARK: - Writing down why

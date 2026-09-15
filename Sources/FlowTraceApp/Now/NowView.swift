@@ -268,7 +268,6 @@ struct NowView: View {
         .compositingGroup()
         .shadow(color: .black.opacity(0.03), radius: 6, y: 2)
         .contentShape(Rectangle())
-        .onTapGesture { model.route = .place(project.path) }
         .contextMenu { projectMenu(project) }
     }
 
@@ -438,8 +437,6 @@ struct NowView: View {
         }
         .nowCard(padding: Journal.Space.l)
         .onHover { hovering = $0 ? canonical : (hovering == canonical ? nil : hovering) }
-        .contentShape(Rectangle())
-        .onTapGesture { model.route = .place(project.path) }
         .contextMenu { projectMenu(project) }
     }
 

@@ -233,19 +233,18 @@ struct QuickCaptureView: View {
             .padding(14)
             .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
 
-            // The design's bottom inset tag: app and what it was showing.
+            // Keep the destination visible without repeating the app identity
+            // already established in the panel title bar and context header.
             HStack(spacing: 8) {
-                if let icon = appIcon {
-                    Image(nsImage: icon).resizable().frame(width: 16, height: 16)
-                }
-                Text(resolved.appName)
-                    .font(.observed(11, weight: .medium))
-                    .foregroundStyle(.white)
                 if let place = resolved.place {
-                    Text("·").foregroundStyle(Color.white.opacity(0.4))
+                    Circle().fill(Journal.pen).frame(width: 6, height: 6)
                     Text(place.name)
                         .font(.mono(10.5))
                         .foregroundStyle(Color.white.opacity(0.8))
+                } else {
+                    Text("Saved to \\(resolved.appName)")
+                        .font(.observed(11, weight: .medium))
+                        .foregroundStyle(.white)
                 }
                 Spacer()
                 if resolved.automationDenied {
