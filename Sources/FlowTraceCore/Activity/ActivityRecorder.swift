@@ -40,6 +40,30 @@ public final class ActivityRecorder {
 
     public private(set) var isRunning = false
 
+    /// Everything that touches the database or another application runs here,
+    /// in the order it happened. Serial on purpose: spans are a sequence, and
+    /// two of them racing would close the wrong one.
+    private let work = DispatchQueue(label: "ai.flowtrace.recorder", qos: .utility)
+
+    /// Set when the recorder is stopping or the app is quitting, so work already
+    /// on the queue drops its write rather than reopening a closed span. Guarded
+    /// by a lock because it is set on the main thread and read on `work`.
+    private let stopLock = NSLock()
+    private nonisolated(unsafe) var _isStopping = false
+
+    private nonisolated var isStopping: Bool {
+        stopLock.lock(); defer { stopLock.unlock() }
+        return _isStopping
+    }
+
+    private nonisolated func markStopping() {
+        stopLock.lock(); _isStopping = true; stopLock.unlock()
+    }
+
+    private nonisolated func clearStopping() {
+        stopLock.lock(); _isStopping = false; stopLock.unlock()
+    }
+
     /// When the recorder last knew the machine was alive. Read at launch to
     /// close a span a crash left open, since a crash writes nothing.
     public static let lastSeenAtKey = "flowtrace.recorder.lastSeenAt"
@@ -59,7 +83,7 @@ public final class ActivityRecorder {
         // token is never removed — quitting is the only thing it fires on.
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main,
-            using: { [weak self] _ in MainActor.assumeIsolated { self?.closeSpan() } }
+            using: { [weak self] _ in MainActor.assumeIsolated { self?.closeSpanNow() } }
         )
         #endif
     }
@@ -70,6 +94,7 @@ public final class ActivityRecorder {
         #if canImport(AppKit)
         guard !isRunning else { return }
         isRunning = true
+        clearStopping()
 
         let workspace = NSWorkspace.shared.notificationCenter
         observe(workspace, NSWorkspace.didActivateApplicationNotification) { [weak self] _ in
@@ -105,7 +130,7 @@ public final class ActivityRecorder {
         observers = []
         idleTimer?.invalidate()
         idleTimer = nil
-        closeSpan()
+        closeSpanNow()
         Diagnostics.log("activity: recording stopped")
         #endif
     }
@@ -124,6 +149,13 @@ public final class ActivityRecorder {
     // MARK: - Capture
 
     /// Records whatever is in front right now, enriched as far as permissions allow.
+    ///
+    /// Only the questions that must be asked on the main thread are asked here:
+    /// which app is frontmost, and when. Reading the window title, asking a
+    /// browser for its tab, and writing the span all happen on `work` — the
+    /// tab read is a synchronous Apple Event with a two-minute timeout, and a
+    /// busy browser used to stall the main thread, which is exactly when the
+    /// capture panel is trying to appear.
     public func captureFrontmost() {
         UserDefaults.standard.set(Date(), forKey: Self.lastSeenAtKey)
         guard isRunning, !isIdle else { return }
@@ -131,50 +163,93 @@ public final class ActivityRecorder {
         guard let bundleId = app.bundleIdentifier,
               !Self.ignoredBundleIdentifiers.contains(bundleId) else { return }
 
-        let name = app.localizedName ?? bundleId
-        var event = ActivityEvent(
-            kind: .app, startedAt: Date(), appName: name, bundleIdentifier: bundleId
+        // Stamped now, not when the write lands: the span began the moment you
+        // switched, however long the browser takes to answer.
+        let event = ActivityEvent(
+            kind: .app, startedAt: Date(),
+            appName: app.localizedName ?? bundleId, bundleIdentifier: bundleId
         )
+        let pid = app.processIdentifier
+        let wantsTitle = captureWindowTitles
+        let wantsTabs = captureBrowserTabs
+        let store = self.store
 
-        // Layer 2: the window title, read once, right now.
-        if captureWindowTitles, let title = focusedWindowTitle(of: app.processIdentifier) {
-            event.target = title
-        }
+        // One serial queue, so spans are written in the order they happened.
+        // Two app switches a moment apart must not race each other into the
+        // database and close the wrong one.
+        work.async { [weak self] in
+            var event = event
+            if wantsTitle, let title = Self.focusedWindowTitle(of: pid) {
+                event.target = title
+            }
 
-        // Layer 3: for a browser, the tab is a better answer than the window title.
-        //
-        // Automation is granted per pair of apps, so being allowed to ask Chrome
-        // says nothing about Brave. A refusal used to fall through to a bare app
-        // name, making an unpermitted browser indistinguishable from one with
-        // nothing open; it is recorded now so Settings can offer the fix.
-        if captureBrowserTabs,
-           let browser = SupportedBrowser.all.first(where: { $0.bundleIdentifier == bundleId }) {
+            // Automation is granted per pair of apps, so being allowed to ask
+            // Chrome says nothing about Brave. A refusal used to fall through to
+            // a bare app name, making an unpermitted browser indistinguishable
+            // from one with nothing open; it is recorded so Settings can offer
+            // the fix.
+            var denied: String?
+            var allowed: String?
+            if wantsTabs,
+               let browser = SupportedBrowser.all.first(where: { $0.bundleIdentifier == bundleId }),
+               // Asked without asking the user. A browser that has never been
+               // connected is skipped rather than prompted: the recorder runs
+               // in the background, and a dialog raised from there arrives with
+               // no explanation of what asked for it.
+               BrowserAccess.status(for: browser) == .connected {
+                do {
+                    if let tab = try BrowserTabReader().activeTab(of: browser) {
+                        event.kind = .browserTab
+                        event.target = tab.pageTitle
+                        event.url = tab.url
+                        allowed = browser.name
+                    }
+                } catch let error as BrowserReadError {
+                    if case .permissionDenied = error { denied = browser.name }
+                } catch {
+                    // Not running, or no window — nothing to report.
+                }
+            }
+
+            // Recording was switched off, or the app is quitting, while this was
+            // being enriched. Opening a span now would leave one behind after
+            // the close that has already happened.
+            guard self?.isStopping != true else { return }
+
             do {
-                let tab = try BrowserTabReader().activeTab(of: browser)
-                if let tab {
-                    event.kind = .browserTab
-                    event.target = tab.pageTitle
-                    event.url = tab.url
-                    browsersNeedingPermission.remove(browser.name)
-                }
-            } catch let error as BrowserReadError {
-                if case .permissionDenied = error {
-                    browsersNeedingPermission.insert(browser.name)
-                }
+                try store.beginActivity(event)
             } catch {
-                // Not running, or no window — nothing to report.
+                Diagnostics.log("activity: writing a span failed: \(error)")
+            }
+
+            if denied != nil || allowed != nil {
+                Task { @MainActor in
+                    if let denied { self?.browsersNeedingPermission.insert(denied) }
+                    if let allowed { self?.browsersNeedingPermission.remove(allowed) }
+                }
             }
         }
+    }
 
-        try? store.beginActivity(event)
+    /// Waits for any span still being written, without blocking the caller's
+    /// thread. The capture panel awaits this before deciding where a note goes:
+    /// the recorder's write is no longer synchronous, so without it a note typed
+    /// immediately after switching apps could be planned against the span the
+    /// user just left.
+    public func settled() async {
+        await withCheckedContinuation { continuation in
+            work.async { continuation.resume() }
+        }
     }
 
     /// The title of the app's focused window, via Accessibility.
     ///
     /// Pull mode by design: asked for at the moment focus changes, never watched.
     /// If the permission isn't granted this returns nil and the timeline simply
-    /// shows the app without a subtitle.
-    private func focusedWindowTitle(of pid: pid_t) -> String? {
+    /// shows the app without a subtitle. `nonisolated` because it is called from
+    /// `work`; the Accessibility API is safe to call off the main thread and
+    /// blocks, which is the reason it is not called on it.
+    private nonisolated static func focusedWindowTitle(of pid: pid_t) -> String? {
         guard AXIsProcessTrusted() else { return nil }
 
         let element = AXUIElementCreateApplication(pid)
@@ -214,8 +289,37 @@ public final class ActivityRecorder {
         }
     }
 
+    /// Closes the open span for sleep, lock, or stepping away.
+    ///
+    /// Queued rather than written here, so it lands *after* any span still
+    /// being enriched — closing first and writing second would leave the day
+    /// ending on a span nothing ever closed.
     private func closeSpan() {
-        try? store.endOpenActivity()
+        let store = self.store
+        let at = Date()
+        work.async {
+            do {
+                try store.endOpenActivity(at: at)
+            } catch {
+                Diagnostics.log("activity: closing the open span failed: \(error)")
+            }
+        }
+    }
+
+    /// Closes the open span for quitting, or for recording being switched off.
+    ///
+    /// Written directly rather than queued: at termination the process may not
+    /// live long enough to drain the queue, and waiting for it would mean
+    /// waiting on an Apple Event to a browser that may be wedged. `isStopping`
+    /// makes any in-flight enrichment drop its write instead, so nothing can
+    /// open a span after this closes one.
+    private func closeSpanNow() {
+        markStopping()
+        do {
+            try store.endOpenActivity(at: Date())
+        } catch {
+            Diagnostics.log("activity: closing the open span on quit failed: \(error)")
+        }
     }
     #endif
 }

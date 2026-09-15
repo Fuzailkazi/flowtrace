@@ -14,9 +14,11 @@ func runBriefTests() {
             ("my token is ghp_AbCdEf0123456789AbCdEf0123456789", "token"),
             ("set AKIAIOSFODNN7EXAMPLE as the id", "aws key"),
             ("connect to postgres://admin:hunter2@db.internal:5432/app", "connection string"),
-            // Matches the VAR=value rule before the provider-prefix one, so it is
-            // labelled "secret". Which marker wins doesn't matter; removal does.
-            ("export STRIPE_SECRET_KEY=sk_live_0123456789abcdef", "secret"),
+            // The provider-prefix rule runs before the generic VAR=value one, so
+            // the specific marker wins. Before the prefix rule existed this was
+            // caught only by the variable name — a bare `sk_live_…` in a
+            // sentence went straight through.
+            ("export STRIPE_SECRET_KEY=sk_live_0123456789abcdef", "api key"),
         ]
         for (input, expectedMarker) in cases {
             let result = Redaction.redact(input)

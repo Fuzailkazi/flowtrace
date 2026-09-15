@@ -36,6 +36,10 @@ for bundle in "$BIN_DIR"/*.bundle; do
     [ -e "$bundle" ] && cp -R "$bundle" "$APP/Contents/Resources/"
 done
 
+if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
+    cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -44,15 +48,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>FlowTrace</string>
     <key>CFBundleDisplayName</key><string>FlowTrace</string>
     <key>CFBundleExecutable</key><string>FlowTrace</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$VERSION</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticTermination</key><false/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>FlowTrace reads the titles and URLs of the tabs in your browser's front window, only when you ask it to capture them. It never reads page contents, cookies or form data.</string>
+    <string>FlowTrace reads the titles and URLs of the tabs in your browser's front window while recording, to show what you were reading. It never reads page contents, cookies or form data.</string>
     <key>NSAppleScriptEnabled</key><false/>
 </dict>
 </plist>

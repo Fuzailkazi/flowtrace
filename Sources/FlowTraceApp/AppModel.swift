@@ -8,6 +8,10 @@ enum Route: Hashable {
     case now
     /// The day you can read.
     case timeline
+    /// Everything you wrote down, across days.
+    case memories
+    /// One memory — a noted activity row — in full.
+    case memory(String)
     case dashboard
     case status(ThreadStatus)
     case thread(String)
@@ -81,6 +85,9 @@ final class AppModel {
     var recentCode: [CodeContext] = []
 
     var route: Route = .now
+    /// Set by "View in Timeline" on a memory: the day to open and the row to
+    /// highlight. Consumed once by the timeline, then cleared.
+    var timelineFocus: (day: Date, eventId: String)?
     var searchText = ""
     var searchResults: [SearchHit] = []
 
@@ -98,6 +105,27 @@ final class AppModel {
     private var server: LocalServer?
     var serverPort: UInt16?
     var serverError: String?
+
+    // MARK: - What may be observed
+
+    /// Whether FlowTrace may observe anything at all.
+    ///
+    /// The product promise is that before you have agreed, FlowTrace observes
+    /// nothing — not a transcript, not a browser tab, not the list of what is
+    /// running. So this is the master gate, and it is `false` until the first
+    /// run is finished. Everything below it is a narrower question about *which*
+    /// of the things you agreed to is switched on.
+    var mayObserve: Bool { consent.hasCompletedOnboarding }
+
+    /// Which agents' transcripts may be opened right now: nothing until
+    /// onboarding is finished, then exactly the sources switched on.
+    var readableSources: AgentSources {
+        guard mayObserve else { return .none }
+        var sources = AgentSources.none
+        if consent.claudeCode { sources.insert(.claudeCode) }
+        if consent.codex { sources.insert(.codex) }
+        return sources
+    }
 
     /// How the quick-capture panel is summoned. Changing it re-registers the
     /// trigger immediately; `shortcutFailure` says so when the system refuses.
@@ -134,6 +162,14 @@ final class AppModel {
     @ObservationIgnored private var hasRepairedOpenSpans = false
 
     func startRecordingIfEnabled() {
+        // Nothing observes before consent. Not the recorder, not the importer,
+        // and not the launch repair — which only reads FlowTrace's own rows,
+        // but there is nothing to repair before anything has been written.
+        guard mayObserve else {
+            Diagnostics.log("observation held — first run is not finished")
+            return
+        }
+
         // Before anything can extend or resume them: close spans that a crash,
         // a quit, or a capture taken with the recorder off left open.
         //
@@ -178,10 +214,16 @@ final class AppModel {
     /// Folds today's agent transcripts into the day. Cheap and idempotent, so it
     /// runs on launch and on a slow timer rather than needing to be exact.
     func importSessions(on day: Date = Date()) {
+        // Read on the main actor before the hop: `AppModel` is @MainActor, and
+        // constructing the importer inside the detached task would read consent
+        // from the wrong isolation.
+        let sources = readableSources
+        guard sources != .none else { return }
         let store = self.store
         Task.detached(priority: .utility) {
             let cache = StoreSessionCache(store: store)
-            let count = SessionImporter().importSessions(on: day, into: store, cache: cache)
+            let count = SessionImporter(sources: sources)
+                .importSessions(on: day, into: store, cache: cache)
             cache.flush()
             guard count > 0 else { return }
             await MainActor.run { [weak self] in self?.activityRevision += 1 }

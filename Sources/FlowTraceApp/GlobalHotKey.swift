@@ -18,7 +18,7 @@ final class GlobalHotKey {
         var message: String {
             switch self {
             case .alreadyTaken:
-                "Another app already uses this shortcut. Pick a different one."
+                "Another app already has this shortcut. Pick a different one below."
             case .systemRefused(let status):
                 "macOS refused this shortcut (error \(status)). Pick a different one."
             }

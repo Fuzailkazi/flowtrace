@@ -13,6 +13,9 @@ extension Store {
         return try database.writer.write { db in
             var saved: [BrowserContext] = []
             for var tab in tabs {
+                // The extension and the capture sheet both arrive here with
+                // whatever the browser had in the address bar.
+                tab.url = Self.storageURL(tab.url) ?? tab.url
                 tab.workThreadId = threadId
                 try tab.insert(db)
                 saved.append(tab)
@@ -74,7 +77,10 @@ extension Store {
 
     /// Which thread, if any, a URL is already filed under. Powers the extension badge.
     public func threadForURL(_ url: String) throws -> WorkThread? {
-        try database.writer.read { db in
+        // Looked up in the form it was stored in, so a page whose address
+        // carries a token is still found.
+        let url = Self.storageURL(url) ?? url
+        return try database.writer.read { db in
             guard let tab = try BrowserContext
                 .filter(BrowserContext.Columns.url == url)
                 .filter(BrowserContext.Columns.workThreadId != nil)

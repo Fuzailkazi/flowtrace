@@ -225,7 +225,7 @@ func runPaletteTests() {
     // changes with the theme is not a meaning.
     TestKit.test("an unknown stored palette falls back rather than failing") {
         UserDefaults.standard.set("does-not-exist", forKey: "flowtrace.palette")
-        expectEqual(Palette.current.id, Palette.paper.id, "falls back to Paper")
+        expectEqual(Palette.current.id, Palette.ambientRecall.id, "falls back to the design default")
         UserDefaults.standard.removeObject(forKey: "flowtrace.palette")
     }
 }

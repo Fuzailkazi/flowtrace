@@ -12,6 +12,10 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var browsers: [BrowserAccess.BrowserState] = []
     @State private var holdings: Store.Holdings?
+    /// Set when the counts below could not be read. Shown, because this section
+    /// is a privacy promise being made checkable and a silent zero is the one
+    /// answer that would make it a false one.
+    @State private var dataFailure: String?
     /// The permission is granted in System Settings, outside this app, so poll
     /// while the pane is open rather than making the user relaunch.
     private let permissionTick = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
@@ -35,7 +39,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .task {
             reload()
-            browsers = BrowserAccess.survey()
+            browsers = model.mayObserve ? BrowserAccess.survey() : []
         }
         .onReceive(permissionTick) { _ in
             let granted = AccessibilityPermission.isGranted
@@ -230,7 +234,7 @@ struct SettingsView: View {
                             case .notAsked:
                                 Button("Connect") {
                                     _ = BrowserAccess.connect(state.browser)
-                                    browsers = BrowserAccess.survey()
+                                    browsers = model.mayObserve ? BrowserAccess.survey() : []
                                 }
                                 .controlSize(.small)
                             case .denied:
@@ -250,7 +254,7 @@ struct SettingsView: View {
                         Text("Only the tab's title and address are read — never the page.")
                             .font(.system(size: 11)).foregroundStyle(.tertiary)
                         Spacer()
-                        Button("Re-check") { browsers = BrowserAccess.survey() }
+                        Button("Re-check") { browsers = model.mayObserve ? BrowserAccess.survey() : [] }
                             .buttonStyle(.link).font(.system(size: 11))
                     }
                 }
@@ -370,8 +374,7 @@ struct SettingsView: View {
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                             Spacer()
                             Button("Forget today", role: .destructive) {
-                                try? model.store.deleteActivity(on: Date())
-                                model.toast = Toast(message: "Today's record deleted")
+                                forgetToday()
                             }
                             .controlSize(.small)
                         }
@@ -388,9 +391,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             SectionHeader(
                 title: "Your shortcut",
-                subtitle: CaptureTrigger.hasBeenChosen
-                    ? "adds a note without opening FlowTrace"
-                    : "not set — nothing will happen until you pick one"
+                subtitle: "adds a note without opening FlowTrace"
             )
             Card {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -441,7 +442,9 @@ struct SettingsView: View {
     @ViewBuilder
     private var chordControls: some View {
         HStack(alignment: .top, spacing: Theme.Space.m) {
-            Text("Needs no permission and can't fire by accident.")
+            Text("⌥Space by default. Needs no permission and can't fire by accident. "
+                 + "If pressing it does nothing, another app has claimed it — "
+                 + "macOS gives the key to whoever asked first and tells neither of you.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
@@ -636,6 +639,15 @@ struct SettingsView: View {
             )
             Card {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let dataFailure {
+                        Label(
+                            "Couldn't read what's stored — \(dataFailure)",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let holdings {
                         VStack(spacing: Theme.Space.s) {
                             holdingRow(
@@ -658,6 +670,26 @@ struct SettingsView: View {
                                 "Project notes", holdings.projectNotes,
                                 "What you said you were building, per repository."
                             )
+                            holdingRow(
+                                "Parsed transcripts", holdings.parsedTranscripts,
+                                "A memo of your agent sessions, so a rescan is fast."
+                            )
+                            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) {
+                                Text(holdings.diagnosticsLabel)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(
+                                        holdings.diagnosticsBytes == 0 ? .tertiary : .primary
+                                    )
+                                    .frame(width: 52, alignment: .trailing)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Diagnostics log")
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text("What the app wrote about itself — not your data.")
+                                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
                         }
                     }
 
@@ -667,11 +699,18 @@ struct SettingsView: View {
                     // surveillance, keep the journal.
                     HStack(spacing: Theme.Space.s) {
                         Button("Erase what was recorded automatically") {
-                            let removed = (try? model.store.deleteRawActivity()) ?? 0
-                            reload()
-                            model.toast = Toast(
-                                message: "Removed \(removed) automatic record\(removed == 1 ? "" : "s") — your notes are untouched"
-                            )
+                            do {
+                                let removed = try model.store.deleteRawActivity()
+                                reload()
+                                model.toast = Toast(
+                                    message: "Removed \(removed) automatic record\(removed == 1 ? "" : "s") — your notes are untouched"
+                                )
+                            } catch {
+                                model.toast = Toast(
+                                    message: "Couldn't erase those: \(error.localizedDescription)",
+                                    isError: true
+                                )
+                            }
                         }
                         .controlSize(.small)
                         Spacer()
@@ -679,9 +718,7 @@ struct SettingsView: View {
 
                     HStack(spacing: Theme.Space.s) {
                         Button("Forget today") {
-                            try? model.store.deleteActivity(on: Date())
-                            reload()
-                            model.toast = Toast(message: "Today's record deleted")
+                            forgetToday()
                         }
                         Button("Export first…") { export(markdown: false) }
                         Spacer()
@@ -741,8 +778,8 @@ struct SettingsView: View {
                             + "contents, cookies, form values or credentials.")
                     promise("Agent transcripts are read for working directory, branch, timestamps "
                             + "and your own prompts. Assistant replies and tool output are ignored.")
-                    promise("Nothing is captured automatically. Every thread and every capture "
-                            + "is something you confirmed.")
+                    promise("Keys, tokens and passwords are stripped from anything FlowTrace "
+                            + "reads — prompts, titles and addresses — before it is stored.")
                 }
             }
         }
@@ -761,10 +798,32 @@ struct SettingsView: View {
 
     // MARK: - Actions
 
+    /// A read that failed, so "What FlowTrace knows" cannot show a row of zeros
+    /// and let it be mistaken for an empty database.
     private func reload() {
-        counts = (try? model.store.counts()) ?? [:]
-        holdings = try? model.store.holdings()
-        ignored = ((try? model.store.ignoredPaths()) ?? []).sorted()
+        do {
+            counts = try model.store.counts()
+            holdings = try model.store.holdings()
+            ignored = try model.store.ignoredPaths().sorted()
+            dataFailure = nil
+        } catch {
+            dataFailure = error.localizedDescription
+        }
+    }
+
+    /// Deleting a day is destructive and irreversible, so it never reports
+    /// success it didn't have.
+    private func forgetToday() {
+        do {
+            try model.store.deleteActivity(on: Date())
+            reload()
+            model.toast = Toast(message: "Today's record deleted")
+        } catch {
+            model.toast = Toast(
+                message: "Couldn't delete today's record: \(error.localizedDescription)",
+                isError: true
+            )
+        }
     }
 
     private func export(markdown: Bool) {
@@ -805,7 +864,13 @@ struct SettingsView: View {
     }
 
     private func unignore(_ path: String) {
-        try? model.store.stopIgnoring(path: path)
+        do {
+            try model.store.stopIgnoring(path: path)
+        } catch {
+            model.toast = Toast(
+                message: "Couldn't un-hide that: \(error.localizedDescription)", isError: true
+            )
+        }
         reload()
     }
 

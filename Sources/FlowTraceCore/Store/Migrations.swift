@@ -198,6 +198,15 @@ enum Migrations {
             }
         }
 
+        // Everything already stored, rewritten through the current rules: the
+        // scan memo emptied, prompts and titles redacted in place, addresses
+        // blanked, and the search index rebuilt so its shadow tables do not keep
+        // the old text. Runs once, in `FlowTraceDatabase.init`, before anything
+        // reads the database.
+        migrator.registerMigration("v6.redactStored") { db in
+            try Store.redactStoredText(db)
+        }
+
         return migrator
     }
 }

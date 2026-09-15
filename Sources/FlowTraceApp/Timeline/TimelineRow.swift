@@ -1,13 +1,16 @@
 import SwiftUI
+import AppKit
 import FlowTraceCore
 
-/// One line of the day.
+/// One card of the day.
 ///
 /// Two voices, visually separated: what the machine observed is set in the system
-/// sans; what you wrote is set in serif italic. That split is the whole difference
-/// between reading a log and reading a journal.
+/// sans; what you wrote is set in italic, in its own band. That split is the whole
+/// difference between reading a log and reading a journal.
 struct TimelineRow: View {
     let event: ActivityEvent
+    /// Briefly true after the row was pointed at from elsewhere.
+    var isHighlighted = false
     var onSave: (String) -> Void
     var onDelete: () -> Void
 
@@ -17,84 +20,156 @@ struct TimelineRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: Journal.Space.m) {
-            Text(event.startedAt, format: .dateTime.hour().minute())
-                .font(.observed(11.5))
-                .monospacedDigit()
-                .foregroundStyle(Journal.inkSoft)
-                .frame(width: 46, alignment: .trailing)
-                .padding(.top, 3)
-
-            VStack(alignment: .leading, spacing: 4) {
-                header
-                reason
-            }
+        HStack(alignment: .top, spacing: Journal.Space.l) {
+            gutter
+            card
         }
-        .padding(.vertical, Journal.Space.m)
+        .padding(.vertical, Journal.Space.s)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .contextMenu {
             Button(event.isUnexplained ? "Add a reason" : "Edit the reason") { beginEditing() }
-            if let url = event.url {
-                Button("Open") { NSWorkspace.shared.open(URL(string: url)!) }
+            if let url = event.url, let link = URL(string: url) {
+                Button("Open") { NSWorkspace.shared.open(link) }
             }
             Divider()
             Button("Forget this", role: .destructive, action: onDelete)
         }
     }
 
+    // MARK: - When
+
+    private var gutter: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text(event.startedAt, format: .dateTime.hour().minute())
+                .font(.mono(12))
+                .foregroundStyle(Journal.ink)
+            if !event.durationLabel.isEmpty {
+                Text(event.durationLabel)
+                    .font(.caption(9.5))
+                    .foregroundStyle(Journal.inkSoft)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: 64, alignment: .trailing)
+        .padding(.top, Journal.Space.l + 2)
+    }
+
     // MARK: - What the machine saw
 
+    private var card: some View {
+        VStack(alignment: .leading, spacing: Journal.Space.m) {
+            header
+
+            if let summary = machineSummary, !summary.isEmpty {
+                Text(summary)
+                    .font(.observed(13))
+                    .foregroundStyle(Journal.inkMid)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let url = event.url, let link = URL(string: url) {
+                Button {
+                    NSWorkspace.shared.open(link)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "link").font(.system(size: 9.5))
+                        Text(url)
+                            .font(.mono(11, weight: .regular))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .foregroundStyle(Journal.inkSoft)
+                }
+                .buttonStyle(.plain)
+                .help("Open")
+            }
+
+            reason
+        }
+        .padding(Journal.Space.l + 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            isHighlighted ? Journal.penSoft : Journal.card,
+            in: RoundedRectangle(cornerRadius: Journal.Radius.card)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Journal.Radius.card)
+                .strokeBorder(isHighlighted ? Journal.pen : Color.clear, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(isHovering ? 0.05 : 0.03), radius: 6, y: 2)
+    }
+
     private var header: some View {
-        HStack(spacing: Journal.Space.s) {
-            Text(event.appName)
-                .font(.observed(13.5, weight: .semibold))
+        HStack(alignment: .firstTextBaseline, spacing: Journal.Space.s) {
+            Image(systemName: kindSymbol)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(Journal.pen)
+                .frame(width: 20, height: 20)
+                .background(Journal.wash, in: RoundedRectangle(cornerRadius: Journal.Radius.chip))
+
+            Text(title)
+                .font(.observed(15, weight: .semibold))
                 .foregroundStyle(Journal.ink)
-
-            if let target = event.target, !target.isEmpty {
-                Text("·").foregroundStyle(Journal.ruleFirm)
-                Text(target)
-                    .font(.observed(13.5))
-                    .foregroundStyle(Journal.inkMid)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } else if let place = event.metadata["place"], !place.isEmpty {
-                // After `target`, never before it: if Accessibility is ever
-                // granted, a window title is a more specific label than a
-                // project name and must not be hidden behind it.
-                Text("·").foregroundStyle(Journal.ruleFirm)
-                Text(place)
-                    .font(.observed(13.5))
-                    .foregroundStyle(Journal.inkMid)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            if event.kind == .agentSession {
-                Text("session")
-                    .font(.observed(10.5, weight: .medium))
-                    .foregroundStyle(Journal.pen)
-                    .padding(.horizontal, 6).padding(.vertical, 1.5)
-                    .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
-            }
+                .lineLimit(2)
+                .truncationMode(.middle)
 
             Spacer(minLength: Journal.Space.s)
+
+            HStack(spacing: 5) {
+                ForEach(chips, id: \.self) { chip in
+                    Text(chip)
+                        .font(.caption(10))
+                        .foregroundStyle(Journal.inkMid)
+                        .lineLimit(1)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Journal.wash, in: RoundedRectangle(cornerRadius: 4))
+                }
+            }
+            .layoutPriority(1)
 
             if isHovering {
                 Button(action: onDelete) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Journal.inkSoft)
-                        .padding(3)
+                        .padding(4)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Forget this")
             }
+        }
+    }
 
-            Text(event.durationLabel)
-                .font(.observed(11))
-                .foregroundStyle(Journal.inkSoft)
+    /// What the entry was: the window or repository first, then the project it
+    /// was in, then the bare app when that's all we know.
+    private var title: String {
+        if let target = event.target, !target.isEmpty { return target }
+        if let place = event.metadata["place"], !place.isEmpty { return place }
+        return event.appName
+    }
+
+    /// The app, the site, and — after `target`, never before it — the place.
+    private var chips: [String] {
+        var out = [event.appName]
+        if let url = event.url, let host = URL(string: url)?.host, host != event.appName {
+            out.append(host)
+        }
+        if let target = event.target, !target.isEmpty,
+           let place = event.metadata["place"], !place.isEmpty, place != target {
+            out.append(place)
+        }
+        return out
+    }
+
+    private var kindSymbol: String {
+        switch event.kind {
+        case .app: "macwindow"
+        case .browserTab: "globe"
+        case .agentSession: "terminal"
+        case .git: "arrow.triangle.branch"
         }
     }
 
@@ -103,21 +178,40 @@ struct TimelineRow: View {
     @ViewBuilder
     private var reason: some View {
         if isEditing {
-            editor
+            noteBand { editor }
         } else if let note = event.note, !note.isEmpty {
-            Text("“\(note)”")
-                .font(.yourWords(15.5))
-                .foregroundStyle(Journal.ink)
-                .textSelection(.enabled)
-                .onTapGesture(count: 2) { beginEditing() }
-        } else if let summary = machineSummary {
-            Text(summary)
-                .font(.observed(13))
-                .foregroundStyle(Journal.inkMid)
-                .lineLimit(2)
+            noteBand {
+                Text(note)
+                    .font(.yourWords(15))
+                    .foregroundStyle(Journal.ink)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .onTapGesture(count: 2) { beginEditing() }
         } else {
             unexplained
         }
+    }
+
+    /// The design's "User Note" block: a quiet band with your words in it.
+    private func noteBand<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "note.text")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Journal.pen)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("YOUR NOTE")
+                    .font(.caption(9.5))
+                    .tracking(1.0)
+                    .foregroundStyle(Journal.inkSoft)
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(Journal.Space.m)
+        .background(Journal.paperDeep, in: RoundedRectangle(cornerRadius: Journal.Radius.field))
     }
 
     /// The prompt is the amber thing, and amber means only this.
@@ -133,7 +227,7 @@ struct TimelineRow: View {
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(
                 Journal.amberSoft.opacity(isHovering ? 1 : 0.72),
-                in: RoundedRectangle(cornerRadius: 7)
+                in: RoundedRectangle(cornerRadius: Journal.Radius.field)
             )
         }
         .buttonStyle(.plain)
@@ -143,7 +237,7 @@ struct TimelineRow: View {
         HStack(spacing: Journal.Space.s) {
             TextField("why did you open this?", text: $draft)
                 .textFieldStyle(.plain)
-                .font(.yourWords(15.5))
+                .font(.yourWords(15))
                 .foregroundStyle(Journal.ink)
                 .focused($focused)
                 .onSubmit(commit)
@@ -154,9 +248,9 @@ struct TimelineRow: View {
                 .foregroundStyle(Journal.pen)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Journal.card, in: RoundedRectangle(cornerRadius: 7))
+        .background(Journal.card, in: RoundedRectangle(cornerRadius: Journal.Radius.chip))
         .overlay(
-            RoundedRectangle(cornerRadius: 7).strokeBorder(Journal.pen, lineWidth: 1)
+            RoundedRectangle(cornerRadius: Journal.Radius.chip).strokeBorder(Journal.pen, lineWidth: 1)
         )
         .onExitCommand { isEditing = false }
     }

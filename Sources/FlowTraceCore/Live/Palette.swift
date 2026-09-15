@@ -18,10 +18,37 @@ public struct Palette: Identifiable, Equatable, Sendable {
     public var inkSoftLight: String, inkSoftDark: String
     public var ruleLight: String,   ruleDark: String
     public var ruleFirmLight: String, ruleFirmDark: String
+    /// A filled surface between the ground and a rule: chips, pills, quiet
+    /// containers. One step firmer than `deep`, one step softer than `rule`.
+    public var washLight: String,   washDark: String
     public var accentLight: String, accentDark: String
     public var accentSoftLight: String, accentSoftDark: String
 
-    public static let all: [Palette] = [.paper, .slate, .nocturne, .linen]
+    public static let all: [Palette] = [.ambientRecall, .paper, .slate, .nocturne, .linen]
+
+    /// The approved visual direction (Stitch project "FlowTrace macOS Memory
+    /// App", design system "Ambient Recall"). Light values are the design's
+    /// Material tokens verbatim: surface, surface-container-low, lowest,
+    /// on-surface, on-surface-variant, outline, surface-container-highest,
+    /// outline-variant, surface-container, primary-container, brand.subtle.
+    /// The design is light-only; the dark values are derived from the HUD
+    /// screen's darks (#1C1C1E, #18191F, #23242C, #2D2D38) and the design
+    /// system's inverse tokens (#F1F1EF, #BAC3FF), and are marked as such.
+    public static let ambientRecall = Palette(
+        id: "ambient-recall", name: "Ambient Recall",
+        blurb: "The FlowTrace design. Quiet paper, indigo accent.",
+        paperLight: "FAF9F7", paperDark: "1C1C1E",
+        deepLight: "F4F3F1", deepDark: "18191F",
+        cardLight: "FFFFFF", cardDark: "23242C",
+        inkLight: "1A1C1B", inkDark: "F1F1EF",
+        inkMidLight: "444655", inkMidDark: "C5C5D8",
+        inkSoftLight: "757686", inkSoftDark: "8E8FA0",
+        ruleLight: "E3E2E0", ruleDark: "2D2D38",
+        ruleFirmLight: "C5C5D8", ruleFirmDark: "3B3C4A",
+        washLight: "EFEEEC", washDark: "2A2B34",
+        accentLight: "3A57E8", accentDark: "7084FF",
+        accentSoftLight: "EEF2FF", accentSoftDark: "1E2440"
+    )
 
     /// Warm notebook paper with a green cast, brown-black ink, fountain-pen blue.
     public static let paper = Palette(
@@ -35,6 +62,7 @@ public struct Palette: Identifiable, Equatable, Sendable {
         inkSoftLight: "918876", inkSoftDark: "8A806C",
         ruleLight: "E3DDCF", ruleDark: "342E23",
         ruleFirmLight: "CFC7B4", ruleFirmDark: "4E4634",
+        washLight: "EDE9DE", washDark: "2C261C",
         accentLight: "33587D", accentDark: "8FB6DA",
         accentSoftLight: "E4EBF2", accentSoftDark: "1B2530"
     )
@@ -51,6 +79,7 @@ public struct Palette: Identifiable, Equatable, Sendable {
         inkSoftLight: "72808F", inkSoftDark: "6D7C8B",
         ruleLight: "DCE3EA", ruleDark: "212A34",
         ruleFirmLight: "BFCAD6", ruleFirmDark: "35424F",
+        washLight: "E5EAEF", washDark: "1A222B",
         accentLight: "1F6FEB", accentDark: "6CA8F5",
         accentSoftLight: "E3EDFD", accentSoftDark: "13212F"
     )
@@ -67,6 +96,7 @@ public struct Palette: Identifiable, Equatable, Sendable {
         inkSoftLight: "7E7E93", inkSoftDark: "74748A",
         ruleLight: "E1E1EA", ruleDark: "26262F",
         ruleFirmLight: "C6C6D4", ruleFirmDark: "3B3B48",
+        washLight: "E6E6EE", washDark: "20202A",
         accentLight: "5B4BC4", accentDark: "A79AF0",
         accentSoftLight: "EAE7FA", accentSoftDark: "1F1B33"
     )
@@ -83,6 +113,7 @@ public struct Palette: Identifiable, Equatable, Sendable {
         inkSoftLight: "8B857B", inkSoftDark: "827C72",
         ruleLight: "E8E4DD", ruleDark: "2E2C29",
         ruleFirmLight: "CFC9BF", ruleFirmDark: "45423D",
+        washLight: "EEEBE6", washDark: "272623",
         accentLight: "1D6B5E", accentDark: "6FC0AE",
         accentSoftLight: "E0F0EC", accentSoftDark: "13251F"
     )
@@ -92,8 +123,8 @@ public struct Palette: Identifiable, Equatable, Sendable {
     private static let defaultsKey = "flowtrace.palette"
 
     public static var current: Palette {
-        let id = UserDefaults.standard.string(forKey: defaultsKey) ?? paper.id
-        return all.first { $0.id == id } ?? paper
+        let id = UserDefaults.standard.string(forKey: defaultsKey) ?? ambientRecall.id
+        return all.first { $0.id == id } ?? ambientRecall
     }
 
     public func select() {

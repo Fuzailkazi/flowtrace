@@ -101,7 +101,15 @@ extension Store {
             for table in try Self.userTables(db) {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
+            // The FTS table is standalone, so emptying `workThread` leaves the
+            // old text in `searchIndex_content`. `userTables` excludes the
+            // shadow tables, and rightly — deleting from them directly errors —
+            // so the virtual table is emptied through its own name.
+            try db.execute(sql: "DELETE FROM searchIndex")
         }
+        // A log of what the app did with your data is part of what "delete
+        // everything" has to mean.
+        Diagnostics.clear()
     }
 
     /// Every table FlowTrace owns: no migration bookkeeping, and no FTS shadow
@@ -149,10 +157,26 @@ extension Store {
         public var pagesVisited: Int
         public var agentSessions: Int
         public var projectNotes: Int
+        /// Sessions FlowTrace has parsed and memoised so a rescan is fast. Held,
+        /// so it is counted — it used to be invisible here and untouched by
+        /// every delete control on the screen.
+        public var parsedTranscripts: Int
         public var fileSizeBytes: Int64
+        /// What the app wrote about itself. Not the user's data, so it does not
+        /// make `isEmpty` false, but it is named so it can be got rid of.
+        public var diagnosticsBytes: Int64
 
         public var isEmpty: Bool {
-            writtenNotes + rawActivity + pagesVisited + agentSessions + projectNotes == 0
+            writtenNotes + rawActivity + pagesVisited
+                + agentSessions + projectNotes + parsedTranscripts == 0
+        }
+
+        /// The log's size in the same shape as the database's.
+        public var diagnosticsLabel: String {
+            let kilobytes = Double(diagnosticsBytes) / 1024
+            return kilobytes < 1024
+                ? String(format: "%.0f KB", kilobytes)
+                : String(format: "%.1f MB", kilobytes / 1024)
         }
 
         public var fileSizeLabel: String {
@@ -164,9 +188,7 @@ extension Store {
     }
 
     public func holdings() throws -> Holdings {
-        let size = (try? FileManager.default.attributesOfItem(
-            atPath: FlowTraceDatabase.defaultURL.path
-        )[.size] as? Int64) ?? 0
+        let size = Self.storedBytes()
 
         return try database.writer.read { db in
             Holdings(
@@ -179,8 +201,27 @@ extension Store {
                 agentSessions: try Int.fetchOne(db, sql:
                     "SELECT count(*) FROM activityEvent WHERE kind = 'agentSession'") ?? 0,
                 projectNotes: try ProjectNote.fetchCount(db),
-                fileSizeBytes: size ?? 0
+                parsedTranscripts: try Int.fetchOne(db, sql:
+                    "SELECT count(*) FROM scanCache") ?? 0,
+                fileSizeBytes: size,
+                diagnosticsBytes: Diagnostics.sizeInBytes()
             )
+        }
+    }
+
+    /// How much disk FlowTrace is actually using.
+    ///
+    /// The database runs in WAL mode, so recent writes live in `-wal` until a
+    /// checkpoint folds them back. Measuring only `flowtrace.sqlite` reported
+    /// "4 KB" while a megabyte of real data sat beside it, which made the
+    /// figure in Settings and the sidebar untrue at exactly the moment it
+    /// mattered — just after writing something.
+    public static func storedBytes(at url: URL = FlowTraceDatabase.defaultURL) -> Int64 {
+        let manager = FileManager.default
+        return [url.path, url.path + "-wal", url.path + "-shm"].reduce(into: Int64(0)) { total, path in
+            guard let size = try? manager.attributesOfItem(atPath: path)[.size] as? Int64
+            else { return }
+            total += size
         }
     }
 
@@ -188,14 +229,31 @@ extension Store {
     ///
     /// The distinction people actually want: erase the surveillance, keep the
     /// journal.
+    /// Deletes everything recorded automatically, keeping everything you wrote.
+    ///
+    /// "Recorded automatically" is wider than the activity table: the scan memo
+    /// holds parsed sessions, pending proposals hold prompts read out of them,
+    /// and the diagnostics log holds what the app saw itself doing. A button
+    /// that said it erased what was recorded automatically and left three of
+    /// those behind was not telling the truth.
+    ///
+    /// Accepted and dismissed proposals stay: those carry a decision you made.
     @discardableResult
     public func deleteRawActivity() throws -> Int {
-        try database.writer.write { db in
+        let erased = try database.writer.write { db -> Int in
             try db.execute(sql: """
                 DELETE FROM activityEvent
                 WHERE (note IS NULL OR note = '') AND kind != 'agentSession'
                 """)
-            return db.changesCount
+            // Captured immediately: `changesCount` reports only the most recent
+            // statement, so reading it after the deletes below would report the
+            // proposal count in a toast that says "removed N automatic records".
+            let count = db.changesCount
+            try db.execute(sql: "DELETE FROM scanCache")
+            try db.execute(sql: "DELETE FROM threadProposal WHERE state = 'pending'")
+            return count
         }
+        Diagnostics.clear()
+        return erased
     }
 }

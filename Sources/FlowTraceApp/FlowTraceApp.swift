@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import FlowTraceCore
 
 @main
@@ -24,14 +25,22 @@ struct FlowTraceApp: App {
 
     init() {
         do {
-            _launch = State(initialValue: .ready(AppModel(store: try Store())))
+            let model = AppModel(store: try Store())
+            // The delegate owns the capture shortcut and the observation
+            // lifecycle, both of which have to outlive the main window.
+            MainActor.assumeIsolated { AppLifecycle.model = model }
+            _launch = State(initialValue: .ready(model))
         } catch {
             _launch = State(initialValue: .failed(error.localizedDescription))
         }
     }
 
+    /// The main window's identifier, so the menu bar can open it by name once
+    /// it is no longer created at launch.
+    static let mainWindowID = "flowtrace.main"
+
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: FlowTraceApp.mainWindowID) {
             Group {
                 switch launch {
                 case .ready(let model):
@@ -48,12 +57,14 @@ struct FlowTraceApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands { FlowTraceCommands(model: launch.model) }
 
-        MenuBarExtra("FlowTrace", systemImage: "point.3.filled.connected.trianglepath.dotted") {
+        MenuBarExtra {
             if let model = launch.model {
                 MenuBarContent(model: model)
             } else {
                 Button("Quit FlowTrace") { NSApplication.shared.terminate(nil) }
             }
+        } label: {
+            Image(nsImage: BrandMark.menuBarImage())
         }
         .menuBarExtraStyle(.window)
 
@@ -87,9 +98,6 @@ struct DatabaseUnavailableView: View {
 
 struct RootView: View {
     @Bindable var model: AppModel
-    @State private var hotKey: GlobalHotKey?
-    @State private var quickCapture: QuickCaptureController?
-    @State private var tapMonitor: ModifierTapMonitor?
 
     var body: some View {
         Group {
@@ -101,99 +109,63 @@ struct RootView: View {
             }
         }
         .task {
+            // Development only: force light or dark for this process so both
+            // appearances can be checked against the design without changing
+            // the system setting.
+            switch ProcessInfo.processInfo.environment["FLOWTRACE_APPEARANCE"] {
+            case "light": NSApp.appearance = NSAppearance(named: .aqua)
+            case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+            default: break
+            }
+            // Starting the model, the recorder and the capture shortcut is
+            // `AppLifecycle`'s job now: this view only exists while the main
+            // window is open, and none of that may depend on a window.
             model.refresh()
-            model.startServerIfEnabled()
-            model.startRecordingIfEnabled()
-            registerHotKey()
             // Lets `flowtrace resume <thread> --open` land straight on a thread.
             if let requested = ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_THREAD"],
                model.thread(id: requested) != nil {
                 model.route = .thread(requested)
             }
+            // Development only: open on a given screen, so each one can be
+            // launched and screenshotted without clicking through. Never set
+            // by the app itself; harmless when absent.
+            if let requested = ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_ROUTE"] {
+                switch requested {
+                case "now": model.route = .now
+                case "timeline": model.route = .timeline
+                case "memories": model.route = .memories
+                case "settings": model.route = .settings
+                case "capture":
+                    // Summon the panel a beat after launch, as the key would.
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(1.5))
+                        NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
+                    }
+                case "memory:first":
+                    if let newest = try? model.store.notedActivity(limit: 1).first {
+                        model.route = .memory(newest.id)
+                    }
+                default:
+                    if requested.hasPrefix("memory:") {
+                        model.route = .memory(String(requested.dropFirst("memory:".count)))
+                    }
+                }
+            }
         }
-        .onChange(of: model.captureTrigger) { _, updated in
-            guard let controller = quickCapture else { return }
-            registerTrigger(updated, controller: controller)
-        }
-        .onChange(of: model.triggerReloadToken) { _, _ in
-            guard let controller = quickCapture else { return }
-            registerTrigger(model.captureTrigger, controller: controller)
-        }
-        .sheet(isPresented: .constant(!model.consent.hasCompletedOnboarding)) {
+        .sheet(isPresented: .constant(!model.consent.hasCompletedOnboarding && !Self.devSkipsOnboarding)) {
             OnboardingView(model: model)
                 .frame(width: 640, height: 560)
                 .interactiveDismissDisabled()
         }
     }
 
-    /// ⌥Space opens a small panel over whatever you are doing.
-    ///
-    /// It deliberately does not bring FlowTrace to the front: being thrown into
-    /// another app is exactly the interruption that stops people capturing
-    /// anything. Silently skipped if another app already owns the combination.
-    private func registerHotKey() {
-        guard hotKey == nil else { return }
-        let controller = QuickCaptureController(model: model)
-        quickCapture = controller
-        registerTrigger(model.captureTrigger, controller: controller)
-
-        // Same panel, reachable from the menubar for anyone who hasn't learned
-        // the shortcut yet.
-        NotificationCenter.default.addObserver(
-            forName: .flowtraceQuickCapture, object: nil, queue: .main
-        ) { _ in
-            Task { @MainActor in controller.toggle() }
-        }
+    /// Development only: `FLOWTRACE_SKIP_ONBOARDING=1` keeps the first-run sheet
+    /// down for this process so screens can be screenshotted. Nothing is saved;
+    /// the next normal launch shows the sheet again.
+    private static var devSkipsOnboarding: Bool {
+        ProcessInfo.processInfo.environment["FLOWTRACE_SKIP_ONBOARDING"] == "1"
     }
 
-    /// Claims the trigger, replacing whatever was registered before, and reports
-    /// back whether the system accepted it.
-    private func registerTrigger(_ trigger: CaptureTrigger, controller: QuickCaptureController) {
-        // Release both mechanisms first: Carbon will not hand over a combination
-        // still claimed by this process, and a stale monitor would double-fire.
-        hotKey = nil
-        tapMonitor?.stop()
-        tapMonitor = nil
-        model.shortcutFailure = nil
-
-        // Registering a shortcut the user never chose is how ⌥Space ended up
-        // claimed on their behalf. Nothing is taken until they pick one.
-        guard CaptureTrigger.hasBeenChosen else {
-            Diagnostics.log("no shortcut chosen yet — nothing registered")
-            return
-        }
-
-        switch trigger {
-        case .chord(let shortcut):
-            let key = GlobalHotKey(shortcut: shortcut) {
-                Task { @MainActor in controller.toggle() }
-            }
-            hotKey = key
-            model.shortcutFailure = key.failure?.message
-            Diagnostics.log(
-                key.failure == nil
-                    ? "trigger \(trigger.displayString) registered"
-                    : "trigger \(trigger.displayString) FAILED — \(key.failure!.message)"
-            )
-
-        case .modifierTap(let modifier, let taps):
-            // Without Accessibility we cannot see keys pressed in other apps, so
-            // say that plainly rather than leaving a dead trigger.
-            guard AccessibilityPermission.isGranted else {
-                model.shortcutFailure =
-                    "Tapping a modifier needs the Accessibility permission. "
-                    + "Grant it below, then this starts working."
-                Diagnostics.log("trigger \(trigger.displayString) blocked — no Accessibility")
-                return
-            }
-            let monitor = ModifierTapMonitor(key: modifier, taps: taps) {
-                Task { @MainActor in controller.toggle() }
-            }
-            monitor.start()
-            tapMonitor = monitor
-            Diagnostics.log("trigger \(trigger.displayString) watching")
-        }
-    }
 }
 
 struct MainWindow: View {
@@ -202,20 +174,16 @@ struct MainWindow: View {
     @State private var showingNewThread = false
 
     var body: some View {
-        Group {
-            // One screen. The sidebar that used to live here — All / Active /
-            // Paused / Completed — was the grammar of a task manager, and it told
-            // everyone the wrong thing about what this is.
-            if model.route == .now {
-                NowView(model: model)
-            } else if model.route == .timeline {
-                TimelineView(model: model)
-            } else {
-                DetailPane(model: model)
-                    .background(Journal.paper)
-            }
+        NavigationSplitView {
+            AppSidebar(model: model)
+                .navigationSplitViewColumnWidth(min: Journal.sidebarWidth, ideal: Journal.sidebarWidth, max: Journal.sidebarWidth)
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
+            DetailPane(model: model)
+                .background(Journal.paper)
+                .toolbar { chrome }
         }
-        .toolbar { chrome }
+        .navigationSplitViewStyle(.balanced)
         .sheet(isPresented: $showingCapture) { CaptureSheet(model: model) }
         .sheet(isPresented: $showingNewThread) { NewThreadSheet(model: model) }
         .overlay(alignment: .bottom) {
@@ -245,12 +213,24 @@ struct MainWindow: View {
     /// a single subject.
     @ToolbarContentBuilder
     private var chrome: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            // The design's "Private Session" chip, worded truthfully.
+            HStack(spacing: 5) {
+                Image(systemName: "lock.fill").font(.system(size: 9, weight: .semibold))
+                Text("Local only").font(.observed(11, weight: .medium))
+            }
+            .foregroundStyle(Journal.inkSoft)
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(Journal.paperDeep, in: RoundedRectangle(cornerRadius: Journal.Radius.chip))
+        }
+
         ToolbarItemGroup {
             Spacer()
 
             Menu {
                 Button("Now") { model.route = .now }
-                Button("Today") { model.route = .timeline }
+                Button("Timeline") { model.route = .timeline }
+                Button("Memories") { model.route = .memories }
                 Divider()
                 Button("Unfinished work") { model.route = .dashboard }
                 Button("All threads") { model.route = .status(.active) }
@@ -281,6 +261,10 @@ struct DetailPane: View {
                 NowView(model: model)
             case .timeline:
                 TimelineView(model: model)
+            case .memories:
+                MemoriesView(model: model)
+            case .memory(let id):
+                MemoryDetailView(model: model, eventId: id)
             case .dashboard:
                 DashboardView(model: model)
             case .status(let status):
@@ -326,7 +310,7 @@ struct FlowTraceCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: .command)
 
-            Button("Why Am I Here?…") {
+            Button("Why am I here?…") {
                 NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
             }
             .keyboardShortcut("j", modifiers: [.command, .shift])

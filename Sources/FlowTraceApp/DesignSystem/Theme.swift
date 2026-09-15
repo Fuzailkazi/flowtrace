@@ -21,9 +21,11 @@ enum Theme {
         static let chip: CGFloat = 5
     }
 
-    static let cardBackground = Color(nsColor: .controlBackgroundColor)
-    static let subtleBorder = Color(nsColor: .separatorColor)
-    static let pageBackground = Color(nsColor: .underPageBackgroundColor)
+    // Bridged onto the Journal palette so the thread-era screens, Settings and
+    // Onboarding sit on the same paper as Now and Timeline instead of system grey.
+    static var cardBackground: Color { Journal.card }
+    static var subtleBorder: Color { Journal.rule }
+    static var pageBackground: Color { Journal.paper }
 
     static func statusColor(_ status: ThreadStatus) -> Color {
         switch status {

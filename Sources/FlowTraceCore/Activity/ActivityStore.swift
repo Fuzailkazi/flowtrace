@@ -17,7 +17,12 @@ extension Store {
     /// alt-tabbing from becoming an unreadable list.
     @discardableResult
     public func beginActivity(_ event: ActivityEvent) throws -> ActivityEvent {
-        try database.writer.write { db in
+        // Before the comparisons below, not after: `describesSameActivity`
+        // compares `target` and `url`, so a raw value would never match the
+        // blanked one already stored and a tokenised page would close and
+        // reopen its span on every tick.
+        let event = Self.forStorage(event)
+        return try database.writer.write { db in
             let open = try ActivityEvent
                 .filter(ActivityEvent.Columns.endedAt == nil)
                 .order(ActivityEvent.Columns.startedAt.desc)
@@ -104,7 +109,7 @@ extension Store {
     /// because they didn't happen "now".
     @discardableResult
     public func recordActivity(_ event: ActivityEvent) throws -> ActivityEvent {
-        var event = event
+        var event = Self.forStorage(event)
         try database.writer.write { db in try event.insert(db) }
         return event
     }
@@ -171,6 +176,8 @@ extension Store {
     /// an AppleScript round trip — so the entry can exist before anyone knows it
     /// was a page rather than just "Brave Browser".
     public func describeActivity(id: String, target: String?, url: String?) throws {
+        let target = Self.storageText(target)
+        let url = Self.storageURL(url)
         try database.writer.write { db in
             guard var event = try ActivityEvent.fetchOne(db, key: id) else { return }
             if let target, !target.isEmpty { event.target = target }
@@ -198,7 +205,7 @@ extension Store {
         try database.writer.write { db in
             guard var event = try ActivityEvent.fetchOne(db, key: id) else { return }
             for (key, value) in metadata {
-                if let value { event.metadata[key] = value }
+                if let value { event.metadata[key] = Self.storageText(value) ?? "" }
                 else { event.metadata.removeValue(forKey: key) }
             }
             try event.update(db)
@@ -263,6 +270,11 @@ extension Store {
     public func upsertImportedActivity(_ event: ActivityEvent) throws -> ActivityEvent {
         guard let externalId = event.externalId else { return try recordActivity(event) }
 
+        // Both branches, not just the update: the importer redacts the prompts
+        // it puts in `asked`, and this covers the title, the place and anything
+        // else a session carries.
+        let event = Self.forStorage(event)
+
         return try database.writer.write { db in
             if var existing = try ActivityEvent
                 .filter(ActivityEvent.Columns.externalId == externalId)
@@ -305,6 +317,41 @@ extension Store {
                 .filter(ActivityEvent.Columns.startedAt < moment)
                 .order(ActivityEvent.Columns.startedAt.desc)
                 .limit(limit)
+                .fetchAll(db)
+        }
+    }
+}
+
+extension Store {
+    /// One row by id, or nil if it has been forgotten since.
+    public func activity(id: String) throws -> ActivityEvent? {
+        try database.writer.read { db in
+            try ActivityEvent.fetchOne(db, key: id)
+        }
+    }
+
+    /// Everything you wrote about, newest first, across every day — the
+    /// Memories screen's only query. Rows with no note are not memories.
+    public func notedActivity(limit: Int = 200) throws -> [ActivityEvent] {
+        try database.writer.read { db in
+            try ActivityEvent
+                .filter(sql: "note IS NOT NULL AND note != ''")
+                .order(ActivityEvent.Columns.startedAt.desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    /// What was happening on either side of a moment, for "around this moment"
+    /// on a memory. Noted or not: the point is the surrounding context.
+    public func activity(around moment: Date, within minutes: Double = 45) throws -> [ActivityEvent] {
+        let from = moment.addingTimeInterval(-minutes * 60)
+        let to = moment.addingTimeInterval(minutes * 60)
+        return try database.writer.read { db in
+            try ActivityEvent
+                .filter(ActivityEvent.Columns.startedAt >= from)
+                .filter(ActivityEvent.Columns.startedAt <= to)
+                .order(ActivityEvent.Columns.startedAt.asc)
                 .fetchAll(db)
         }
     }

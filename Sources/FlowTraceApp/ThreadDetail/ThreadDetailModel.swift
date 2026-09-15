@@ -23,6 +23,9 @@ final class ThreadDetailModel {
 
     /// Set only when the user asks for a summary; cleared when they dismiss it.
     var summary: ThreadSummary?
+    /// A failed load. Everything here renders as an empty section otherwise,
+    /// which reads as "you never linked anything to this thread".
+    var loadFailure: String?
 
     init(app: AppModel, threadId: String) {
         self.app = app
@@ -36,10 +39,15 @@ final class ThreadDetailModel {
         let store = app.store
         let id = self.threadId
 
-        tabs = (try? store.tabs(threadId: id)) ?? []
-        code = (try? store.codeContexts(threadId: id)) ?? []
-        notes = (try? store.notes(threadId: id)) ?? []
-        timeline = (try? store.timeline(threadId: id)) ?? []
+        do {
+            tabs = try store.tabs(threadId: id)
+            code = try store.codeContexts(threadId: id)
+            notes = try store.notes(threadId: id)
+            timeline = try store.timeline(threadId: id)
+            loadFailure = nil
+        } catch {
+            loadFailure = error.localizedDescription
+        }
         refreshRepoChanges()
     }
 
@@ -104,17 +112,35 @@ final class ThreadDetailModel {
     }
 
     func deleteNote(id: String) {
-        try? app.store.deleteNote(id: id)
+        do {
+            try app.store.deleteNote(id: id)
+        } catch {
+            app.toast = Toast(
+                message: "Couldn't delete that note: \(error.localizedDescription)", isError: true
+            )
+        }
         load()
     }
 
     func removeTab(id: String) {
-        try? app.store.removeTab(id: id)
+        do {
+            try app.store.removeTab(id: id)
+        } catch {
+            app.toast = Toast(
+                message: "Couldn't remove that page: \(error.localizedDescription)", isError: true
+            )
+        }
         reload()
     }
 
     func removeCode(id: String) {
-        try? app.store.removeCode(id: id)
+        do {
+            try app.store.removeCode(id: id)
+        } catch {
+            app.toast = Toast(
+                message: "Couldn't remove that repository: \(error.localizedDescription)", isError: true
+            )
+        }
         reload()
     }
 

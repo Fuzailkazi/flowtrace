@@ -9,9 +9,12 @@ import FlowTraceCore
 /// panel take keyboard focus for the few seconds you need it, then hand focus
 /// straight back when it closes.
 final class QuickCapturePanel: NSPanel {
+    /// The design's panel is 660 wide; height follows the content.
+    static let width: CGFloat = 660
+
     init(content: NSView) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: QuickCapturePanel.width, height: 420),
             // Deliberately *not* .nonactivatingPanel. That flag stops the panel
             // becoming key even when the app is activated, which showed up in the
             // log as "key: false" — the panel appeared and then silently refused
@@ -30,6 +33,10 @@ final class QuickCapturePanel: NSPanel {
         // Follow the user onto other spaces and over full-screen apps — the whole
         // point is that it reaches you where you already are.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        // The design draws the panel as one rounded card with no system chrome.
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
         contentView = content
         standardWindowButton(.closeButton)?.isHidden = true
         standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -64,6 +71,9 @@ final class QuickCaptureController {
         self.model = model
     }
 
+    /// Whether the panel is on screen, so nothing else raises a window over it.
+    var isPresenting: Bool { panel?.isVisible ?? false }
+
     /// Snapshots where the user is, then shows the panel over it.
     func toggle() {
         Diagnostics.log("quick-capture toggle (visible: \(panel?.isVisible ?? false))")
@@ -83,17 +93,27 @@ final class QuickCaptureController {
             snapshot: snapshot,
             onFinish: { [weak self] in self?.dismiss(returningTo: previousApp) }
         )
-        let hosting = NSHostingView(rootView: view)
-        hosting.frame = NSRect(x: 0, y: 0, width: 520, height: 200)
+        // Let the SwiftUI content decide the height: the panel is a card whose
+        // sections stack, not a fixed 200pt box. A hosting controller can
+        // measure the view before it is in a window; a bare hosting view
+        // reports zero until it has been laid out.
+        let controller = NSHostingController(rootView: view)
+        let measured = controller.sizeThatFits(
+            in: NSSize(width: QuickCapturePanel.width, height: 1200)
+        )
+        let height = measured.height > 200 ? measured.height : 520
+        let hosting = controller.view
+        hosting.frame = NSRect(x: 0, y: 0, width: QuickCapturePanel.width, height: height)
 
         let panel = QuickCapturePanel(content: hosting)
+        panel.setContentSize(NSSize(width: QuickCapturePanel.width, height: height))
         panel.positionOverActiveScreen()
         self.panel = panel
 
-        // FlowTrace has a dock icon, so it is a "regular" app — and a regular
-        // app's window cannot take keyboard focus while another app is active,
-        // however floating the panel is. Without activating first, the panel
-        // appears but refuses to accept a single keystroke.
+        // FlowTrace is LSUIElement (menu-bar resident, no dock icon), so it is
+        // not a "regular" app — but its panel still cannot take keyboard focus
+        // while another app is active, however floating the panel is. Without
+        // activating first, the panel appears but refuses to accept keystrokes.
         //
         // Activating shows the panel only: the main window is never ordered
         // front, and focus is handed straight back on dismiss.

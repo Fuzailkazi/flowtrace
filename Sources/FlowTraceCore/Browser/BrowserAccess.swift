@@ -37,6 +37,39 @@ public enum BrowserAccess {
         }
     }
 
+    /// Whether FlowTrace may talk to a browser, asked without asking the user.
+    ///
+    /// `AEDeterminePermissionToAutomateTarget` answers the question that
+    /// reading a tab used to answer by attempting it — and attempting it is
+    /// precisely what makes macOS put up "FlowTrace wants to control Safari".
+    /// The `askUserIfNeeded: false` argument is load-bearing: with `true` this
+    /// call blocks and prompts, and `-1744` is only returned when it is false.
+    public static func status(for browser: SupportedBrowser) -> Status {
+        #if canImport(AppKit)
+        let running = NSWorkspace.shared.runningApplications
+            .contains { $0.bundleIdentifier == browser.bundleIdentifier }
+        guard running else { return .notRunning }
+
+        var target = AEAddressDesc()
+        let identifier = Array(browser.bundleIdentifier.utf8)
+        let created = AECreateDesc(
+            DescType(typeApplicationBundleID), identifier, identifier.count, &target
+        )
+        guard created == noErr else { return .notAsked }
+        defer { AEDisposeDesc(&target) }
+
+        switch AEDeterminePermissionToAutomateTarget(&target, typeWildCard, typeWildCard, false) {
+        case noErr: return .connected
+        case OSStatus(errAEEventWouldRequireUserConsent): return .notAsked
+        case OSStatus(errAEEventNotPermitted): return .denied
+        case OSStatus(procNotFound): return .notRunning
+        default: return .notAsked
+        }
+        #else
+        return .notRunning
+        #endif
+    }
+
     /// Checks each installed browser, prompting for none of them.
     ///
     /// A read is attempted only against browsers already running, because asking
@@ -50,7 +83,7 @@ public enum BrowserAccess {
             guard running.contains(browser.bundleIdentifier) else {
                 return BrowserState(browser: browser, status: .notRunning)
             }
-            return BrowserState(browser: browser, status: probe(browser))
+            return BrowserState(browser: browser, status: status(for: browser))
         }
         #else
         return []

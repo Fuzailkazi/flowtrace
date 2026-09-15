@@ -12,7 +12,11 @@ struct OnboardingView: View {
 
     enum Step { case welcome, shortcut, consent, scanning, review }
     @State private var step: Step = .welcome
-    @State private var chosen = false
+
+    /// What is actually running on this Mac, for the opening sentence. Nil while
+    /// the census is in flight; `liveFailure` when it could not be taken.
+    @State private var liveSummary: String?
+    @State private var liveFailure: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,15 +47,36 @@ struct OnboardingView: View {
     private var welcome: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             Spacer()
-            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Color.accentColor)
+            BrandMarkView(size: 44)
             Text("FlowTrace")
                 .font(.system(size: 26, weight: .semibold))
-            Text("You start things and don't finish them. FlowTrace finds those things.")
-                .font(.system(size: 15))
-                .foregroundStyle(.secondary)
-            Text("It reads your coding-agent transcripts and git state — on this machine, "
+            // Measured, not written — but only when asked for. Counting
+            // processes opens no transcript and needs no permission, yet it is
+            // still looking at this Mac, and the promise is that nothing is
+            // looked at before you say so. Pressing the button is saying so.
+            Group {
+                if let liveSummary {
+                    Text(liveSummary)
+                } else if let liveFailure {
+                    Text("FlowTrace couldn't read what's running on this Mac — \(liveFailure)")
+                } else if censusRunning {
+                    Text("Counting what's running…")
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        Text("FlowTrace can tell you what is running on this Mac right now. "
+                             + "It counts processes and listening ports — no files are opened, "
+                             + "nothing is stored, and nothing happens until you ask.")
+                        Button("Count what's running") {
+                            Task { await readCensus() }
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+            .font(.system(size: 15))
+            .foregroundStyle(liveFailure == nil ? .secondary : Color.orange)
+            .fixedSize(horizontal: false, vertical: true)
+            Text("FlowTrace shows what is actually happening on your machine — which agents are running and where each one stopped, which servers are still holding ports, what you had open — so you can pick up where you left off. It reads your coding-agent transcripts and git state — on this machine, "
                  + "read-only, nothing uploaded — and works out which pieces of work were "
                  + "started and never finished. You decide which ones are worth keeping.")
                 .font(.system(size: 13))
@@ -60,6 +85,28 @@ struct OnboardingView: View {
             Spacer()
         }
         .padding(Theme.Space.xxl)
+    }
+
+    /// Counts what is running, off the main actor — `pgrep` and `lsof` are
+    /// subprocesses. A failure is shown rather than papered over with a number
+    /// nobody measured.
+    @State private var censusRunning = false
+
+    private func readCensus() async {
+        guard liveSummary == nil, liveFailure == nil, !censusRunning else { return }
+        censusRunning = true
+        defer { censusRunning = false }
+        let census = await Task.detached(priority: .userInitiated) {
+            () -> Result<(agents: Int, servers: Int), Error> in
+            do { return .success(try LiveStateReader().readCensus()) }
+            catch { return .failure(error) }
+        }.value
+        switch census {
+        case .success(let counts):
+            liveSummary = LiveState.firstRunSummary(agents: counts.agents, servers: counts.servers)
+        case .failure(let error):
+            liveFailure = error.localizedDescription
+        }
     }
 
     /// Picking the key is a setup step, not a preference.
@@ -86,7 +133,7 @@ struct OnboardingView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Your shortcut")
                                 .font(.system(size: 12, weight: .medium))
-                            Text("Click and press the combination you want.")
+                            Text("⌥Space already works. Click it to use something else.")
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -95,7 +142,6 @@ struct OnboardingView: View {
                             set: {
                                 model.lastChord = $0
                                 model.captureTrigger = .chord($0)
-                                chosen = true
                             }
                         ))
                     }
@@ -105,9 +151,11 @@ struct OnboardingView: View {
                             .font(.system(size: 11)).foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
-                        Text("Avoid ⌘Space and ⌥Space — Spotlight, Raycast and Alfred "
-                             + "commonly hold those, and macOS will let FlowTrace register "
-                             + "a key it then never receives.")
+                        Text("If pressing it does nothing, another app has claimed it — "
+                             + "Spotlight, Raycast and Alfred all use keys like this one, "
+                             + "and macOS gives it to whoever asked first without telling "
+                             + "either of you. Record a different combination here if that "
+                             + "happens.")
                             .font(.system(size: 11)).foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -129,6 +177,12 @@ struct OnboardingView: View {
                     .font(.system(size: 12)).foregroundStyle(.secondary)
             }
 
+            if let failure = model.shortcutFailure {
+                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             sourceToggle(
                 isOn: $model.consent.claudeCode,
                 title: "Claude Code",
@@ -147,8 +201,9 @@ struct OnboardingView: View {
                     Label("What is read", systemImage: "eye")
                         .font(.system(size: 12, weight: .medium))
                     Text("The working directory, git branch, timestamps, the session's own title, "
-                         + "and the prompts you typed. Assistant replies, file contents, tool "
-                         + "output and credentials are never read or stored.")
+                         + "and the prompts you typed. Assistant replies, file contents and tool "
+                         + "output are never read. Keys, tokens and passwords are stripped from "
+                         + "prompts before anything is stored.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Label("Where it goes", systemImage: "internaldrive")
@@ -157,6 +212,14 @@ struct OnboardingView: View {
                     Text(FlowTraceDatabase.defaultURL.path)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
+                    Label("What is seen without reading a file", systemImage: "cpu")
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.top, Theme.Space.xs)
+                    Text("Which coding agents and local servers are running, and the project "
+                         + "each was started from. This is process information, not file "
+                         + "contents, and it begins only once you finish this setup.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text("No account, no server, no telemetry. FlowTrace makes no network requests.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
@@ -273,10 +336,10 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
 
             case .shortcut:
-                Button(chosen ? "Use \(model.captureTrigger.displayString)"
-                              : "Use \(model.captureTrigger.displayString)") {
-                    // Accepting the suggestion is as deliberate as recording one.
-                    model.captureTrigger = model.captureTrigger
+                Button("Use \(model.captureTrigger.displayString)") {
+                    // Already registered at launch; saved here so a recorded
+                    // change survives, and re-registered so a clash is reported
+                    // on this screen rather than after it has gone.
                     model.captureTrigger.save()
                     model.reregisterTrigger()
                     step = .consent
@@ -304,9 +367,23 @@ struct OnboardingView: View {
     }
 
     private func finish() {
+        // Nothing to settle about the shortcut here: ⌥Space is registered at
+        // launch whether or not this screen is ever reached, and a recorded
+        // change is saved by the step that recorded it.
         model.consent.hasCompletedOnboarding = true
         model.consent.save()
+        // The master gate has just opened. Start what the user agreed to now
+        // rather than making them relaunch to get it.
+        model.startRecordingIfEnabled()
         model.refresh()
+        // Land on the value: unfinished work when there is any, otherwise Now.
+        // The previous default always landed on Now, hiding proposals behind
+        // More → Unfinished where nobody found them.
+        if !model.proposals.isEmpty {
+            model.route = .dashboard
+        } else {
+            model.route = .now
+        }
         dismiss()
     }
 

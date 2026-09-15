@@ -29,6 +29,17 @@ struct ThreadDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
                 header
+                if let failure = detail.loadFailure {
+                    Card {
+                        Label(
+                            "Couldn't read what's linked to this thread — \(failure)",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if editing { editor } else { fields }
                 if let summary = detail.summary { summaryCard(summary) }
                 linkedRepositories

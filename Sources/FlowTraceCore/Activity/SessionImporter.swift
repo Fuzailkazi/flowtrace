@@ -11,11 +11,21 @@ public struct SessionImporter: Sendable {
     private let codex: CodexAdapter
     private let git: GitProbe
 
+    private let sources: AgentSources
+
+    /// `sources` is the permission. The `.all` default keeps the CLI working,
+    /// where typing the command *is* the consent; the app never uses the
+    /// default and always passes what the user actually switched on.
+    ///
+    /// Adapters stay injectable because the tests point them at `Fixtures/`,
+    /// and `main.swift` promises the suite never reads the real `~/.claude`.
     public init(
+        sources: AgentSources = .all,
         claude: ClaudeCodeAdapter = ClaudeCodeAdapter(),
         codex: CodexAdapter = CodexAdapter(),
         git: GitProbe = GitProbe()
     ) {
+        self.sources = sources
         self.claude = claude
         self.codex = codex
         self.git = git
@@ -32,11 +42,15 @@ public struct SessionImporter: Sendable {
         let start = calendar.startOfDay(for: day)
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return 0 }
 
+        // Nothing switched on means nothing is opened — not even a directory
+        // listing, which would expose session identifiers.
+        guard sources != .none else { return 0 }
+
         var sessions: [AgentSession] = []
-        if claude.isAvailable {
+        if sources.allows(.claudeCode), claude.isAvailable {
             sessions += (try? claude.discoverSessions(cache: cache)) ?? []
         }
-        if codex.isAvailable {
+        if sources.allows(.codex), codex.isAvailable {
             // Two days of slack, so a session that began late last night and ran
             // past midnight is still found.
             sessions += (try? codex.discoverSessions(modifiedWithin: 2, cache: cache)) ?? []

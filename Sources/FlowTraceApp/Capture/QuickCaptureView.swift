@@ -38,14 +38,19 @@ struct QuickCaptureView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Journal.Space.m) {
-            header
-            if saved { confirmation } else { editor }
-            if !leadingUp.isEmpty, !saved { context }
+        VStack(alignment: .leading, spacing: 0) {
+            titleBar
+            contextCard
+            if saved { confirmation } else { noteArea }
+            footerBar
         }
-        .padding(Journal.Space.l)
-        .frame(width: 520, alignment: .leading)
-        .background(Journal.card)
+        .frame(width: QuickCapturePanel.width, alignment: .leading)
+        .background(Journal.paper)
+        .clipShape(RoundedRectangle(cornerRadius: Journal.Radius.panel, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Journal.Radius.panel, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.08), lineWidth: 1)
+        )
         .onAppear(perform: load)
         // The one measurement that settles whether keystrokes are being lost:
         // how much text actually reached the field, and whether it was kept.
@@ -59,90 +64,248 @@ struct QuickCaptureView: View {
         }
     }
 
-    // MARK: - Where you are
+    // MARK: - Title bar
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .top) {
-                Text("Right now")
-                    .font(.observed(10.5, weight: .semibold))
-                    .tracking(1.3)
-                    .foregroundStyle(Journal.pen)
-
-                Spacer()
-
-                // Escape works, but a panel with no visible way out reads as a
-                // thing that has taken over rather than one you summoned.
-                Button(action: { if !saving { onFinish() } }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Journal.inkSoft)
-                        .padding(4)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Close without writing anything (esc)")
+    /// The design's window title bar: mark, name, the key, and where you were.
+    private var titleBar: some View {
+        HStack(spacing: Journal.Space.m) {
+            HStack(spacing: 6) {
+                BrandMarkView(size: 16, color: Journal.ink)
+                Text("Quick Capture")
+                    .font(.observed(12, weight: .semibold))
+                    .tracking(-0.2)
+                    .foregroundStyle(Journal.ink)
+                keycap(model.captureTrigger.displayString)
             }
 
-            Text(resolved.summary)
-                .font(.journalTitle(22))
-                .foregroundStyle(Journal.ink)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 5) {
-                Text(resolved.appName)
-                if let detail = resolved.detail {
-                    Text("·").foregroundStyle(Journal.ruleFirm)
-                    Text(detail)
-                }
-                if resolved.openTabCount > 1 {
-                    Text("·").foregroundStyle(Journal.ruleFirm)
-                    Text("\(resolved.openTabCount) tabs open")
-                }
-                if let current, current.isOpen, isAnnotatingOpenSpan {
-                    Text("·").foregroundStyle(Journal.ruleFirm)
-                    Text(current.durationLabel)
-                }
-            }
-            .font(.observed(11.5))
-            .foregroundStyle(Journal.inkSoft)
-
-            if resolved.automationDenied { automationNotice }
-        }
-    }
-
-    /// A browser FlowTrace has never been granted access to looks exactly like a
-    /// browser with no tabs. Saying so, with the fix attached, is the difference
-    /// between a bug and a setup step.
-    private var automationNotice: some View {
-        HStack(spacing: Journal.Space.s) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(Journal.amber)
-            Text("FlowTrace can't read \(resolved.appName)'s tabs yet")
-                .font(.observed(11.5))
-                .foregroundStyle(Journal.amber)
             Spacer()
-            Button("Allow…") {
-                AutomationPermission.openSettings()
+
+            HStack(spacing: 6) {
+                Circle().fill(Journal.live).frame(width: 7, height: 7)
+                Text("Where you were, just now")
+                    .font(.observed(11, weight: .medium))
+                    .foregroundStyle(Journal.inkMid)
+            }
+            appChip(resolved.appName)
+
+            // Escape works, but a panel with no visible way out reads as a
+            // thing that has taken over rather than one you summoned.
+            Button(action: { if !saving { onFinish() } }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Journal.inkSoft)
+                    .padding(5)
+                    .background(Journal.wash, in: Circle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .font(.observed(11, weight: .medium))
-            .foregroundStyle(Journal.pen)
+            .help("Close without writing anything (esc)")
         }
-        .padding(.horizontal, 9).padding(.vertical, 5)
-        .background(Journal.amberSoft, in: RoundedRectangle(cornerRadius: 6))
-        .padding(.top, 5)
+        .padding(.horizontal, Journal.Space.l)
+        .frame(height: 44)
+        .background(
+            LinearGradient(colors: [Journal.card, Journal.paperDeep], startPoint: .top, endPoint: .bottom)
+        )
+        .overlay(alignment: .bottom) { Divider().overlay(Color.black.opacity(0.06)) }
+    }
+
+    private func keycap(_ text: String) -> some View {
+        Text(text)
+            .font(.mono(10))
+            .foregroundStyle(Journal.inkSoft)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Journal.card, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.black.opacity(0.08), lineWidth: 1))
+    }
+
+    private func appChip(_ name: String) -> some View {
+        HStack(spacing: 4) {
+            if let icon = appIcon {
+                Image(nsImage: icon).resizable().frame(width: 12, height: 12)
+            }
+            Text(name).font(.observed(11, weight: .medium))
+        }
+        .foregroundStyle(Journal.inkMid)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Color.black.opacity(0.04), in: Capsule())
+    }
+
+    /// What the panel can say when the app gave up nothing but its name. The
+    /// window title needs Accessibility; a page needs Automation for that
+    /// browser. Naming the missing permission beats an empty card.
+    private var knownOnlyByApp: String {
+        if resolved.automationDenied {
+            return "FlowTrace can't read \(resolved.appName)'s tabs, so the note lands on the app."
+        }
+        if resolved.isBrowser {
+            return "Reading the tab…"
+        }
+        if !AccessibilityPermission.isGranted {
+            return "No window title — grant Accessibility in Settings and entries say which window."
+        }
+        return "No window title. The note lands on \(resolved.appName)."
+    }
+
+    /// The frontmost app's real icon, when macOS knows it.
+    private var appIcon: NSImage? {
+        guard let id = resolved.bundleIdentifier,
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)
+        else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    // MARK: - Where you are
+
+    /// The design shows a captured frame here. FlowTrace takes no screenshots,
+    /// so the slot holds what it actually knows about where you are: the page
+    /// or window, the address, the project — on the same dark card.
+    private var contextCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 8) {
+                    Circle().fill(Journal.pen).frame(width: 7, height: 7)
+                    Text(resolved.place?.name ?? resolved.summary)
+                        .font(.mono(11.5, weight: .semibold))
+                        .foregroundStyle(Color(white: 0.9))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let detail = resolved.detail {
+                        Text("— \(detail)")
+                            .font(.mono(10.5))
+                            .foregroundStyle(Color(white: 0.55))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Text(Date(), format: .dateTime.hour().minute().second())
+                        .font(.mono(10))
+                        .foregroundStyle(Color(white: 0.55))
+                }
+                .padding(.bottom, 8)
+                .overlay(alignment: .bottom) { Divider().overlay(Color(white: 0.2)) }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    if resolved.summary != resolved.appName {
+                        Text(resolved.summary)
+                            .font(.journalTitle(17))
+                            .tracking(-0.3)
+                            .foregroundStyle(Color(white: 0.95))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        // All FlowTrace knows is which app was in front. Say that,
+                        // rather than printing its name a third time.
+                        Text(knownOnlyByApp)
+                            .font(.observed(12))
+                            .foregroundStyle(Color(white: 0.55))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let url = resolved.url {
+                        Text(url)
+                            .font(.mono(11))
+                            .foregroundStyle(Color(white: 0.6))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else if let place = resolved.place {
+                        Text(place.root.abbreviatingHome)
+                            .font(.mono(11))
+                            .foregroundStyle(Color(white: 0.6))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else if let title = resolved.windowTitle, title != resolved.summary {
+                        Text(title)
+                            .font(.mono(11))
+                            .foregroundStyle(Color(white: 0.6))
+                            .lineLimit(1)
+                    }
+                    if resolved.openTabCount > 1 {
+                        Text("\(resolved.openTabCount) tabs open in this window")
+                            .font(.mono(10.5))
+                            .foregroundStyle(Color(white: 0.5))
+                    }
+                    if let current, current.isOpen, isAnnotatingOpenSpan {
+                        Text("here for \(current.durationLabel)")
+                            .font(.mono(10.5))
+                            .foregroundStyle(Color(white: 0.5))
+                    }
+                }
+                .padding(.top, 10)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+
+            // The design's bottom inset tag: app and what it was showing.
+            HStack(spacing: 8) {
+                if let icon = appIcon {
+                    Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+                }
+                Text(resolved.appName)
+                    .font(.observed(11, weight: .medium))
+                    .foregroundStyle(.white)
+                if let place = resolved.place {
+                    Text("·").foregroundStyle(Color.white.opacity(0.4))
+                    Text(place.name)
+                        .font(.mono(10.5))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                }
+                Spacer()
+                if resolved.automationDenied {
+                    Button("Allow reading tabs…") { AutomationPermission.openSettings() }
+                        .buttonStyle(.plain)
+                        .font(.mono(10.5))
+                        .foregroundStyle(Journal.amber)
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(
+                LinearGradient(
+                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.6)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+        }
+        .background(Color(nsColor: NSColor(hex: "0F1117")))
+        .clipShape(RoundedRectangle(cornerRadius: Journal.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Journal.Radius.card, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.1), lineWidth: 1)
+        )
+        .padding(14)
+        .background(Journal.paperDeep)
+        .overlay(alignment: .bottom) { Divider().overlay(Color.black.opacity(0.05)) }
     }
 
     // MARK: - The one field
 
-    private var editor: some View {
-        VStack(alignment: .leading, spacing: Journal.Space.s) {
-            TextField("why are you here?", text: $note)
+    /// The placeholder names where you are, so the blank field never reads as
+    /// a blank box: "why are you on XYZ video?" beats "why are you here?".
+    private var placeholder: String {
+        let where_ = resolved.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if where_.isEmpty || where_ == resolved.appName { return "why are you here?" }
+        let short = where_.count > 60 ? String(where_.prefix(60)) + "…" : where_
+        return "why are you on \(short)?"
+    }
+
+    private var noteArea: some View {
+        VStack(alignment: .leading, spacing: Journal.Space.m) {
+            HStack {
+                HStack(spacing: 5) {
+                    Text("Why are you here?")
+                        .font(.observed(12, weight: .medium))
+                        .foregroundStyle(Journal.inkMid)
+                    Text("— your words, kept")
+                        .font(.observed(12))
+                        .foregroundStyle(Journal.inkSoft)
+                }
+                Spacer()
+                Text("Press ⏎ to save")
+                    .font(.mono(10.5))
+                    .foregroundStyle(Journal.inkSoft)
+            }
+
+            TextField(placeholder, text: $note, axis: .vertical)
+                .lineLimit(2...4)
                 .textFieldStyle(.plain)
-                .font(.yourWords(17))
+                .font(.yourWords(14.5))
                 .foregroundStyle(Journal.ink)
                 .focused($focused)
                 .onSubmit(save)
@@ -158,10 +321,11 @@ struct QuickCaptureView: View {
                 // set in the same main-actor turn as the keypress, so the field
                 // goes inert with no window to type into.
                 .disabled(saving)
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Journal.paper, in: RoundedRectangle(cornerRadius: 8))
+                .padding(12)
+                .background(Journal.paperDeep, in: RoundedRectangle(cornerRadius: Journal.Radius.card))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8).strokeBorder(Journal.pen, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Journal.Radius.card)
+                        .strokeBorder(focused ? Journal.pen : Color.black.opacity(0.08), lineWidth: 1)
                 )
 
             suggestionRow
@@ -178,20 +342,11 @@ struct QuickCaptureView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Journal.amberSoft, in: RoundedRectangle(cornerRadius: 6))
-            }
-
-            HStack(spacing: Journal.Space.s) {
-                Text("⏎ save").font(.observed(10.5)).foregroundStyle(Journal.inkSoft)
-                Text("esc cancel").font(.observed(10.5)).foregroundStyle(Journal.inkSoft)
-                Spacer()
-                Text(model.captureTrigger.displayString)
-                    .font(.observed(10.5, weight: .medium))
-                    .foregroundStyle(Journal.pen)
-                    .padding(.horizontal, 6).padding(.vertical, 1.5)
-                    .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
+                .background(Journal.amberSoft, in: RoundedRectangle(cornerRadius: Journal.Radius.chip))
             }
         }
+        .padding(Journal.Space.l)
+        .background(Journal.card)
         .background {
             Button("") { if !saving { onFinish() } }
                 .keyboardShortcut(.escape, modifiers: [])
@@ -199,51 +354,76 @@ struct QuickCaptureView: View {
         }
     }
 
-    /// What led here. Pre-existing context is what turns a blank box into a
-    /// prompt you only have to confirm.
-    private var context: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("Just before this")
-                .font(.observed(10, weight: .semibold))
-                .tracking(1.1)
-                .foregroundStyle(Journal.inkSoft)
-
-            ForEach(leadingUp) { event in
-                HStack(alignment: .top, spacing: 7) {
-                    Text(event.startedAt, format: .dateTime.hour().minute())
-                        .font(.observed(10.5)).monospacedDigit()
-                        .foregroundStyle(Journal.inkSoft)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(event.target.map { "\(event.appName) · \($0)" } ?? event.appName)
-                            .font(.observed(12))
-                            .foregroundStyle(Journal.inkMid)
-                            .lineLimit(1)
-                        if let note = event.note, !note.isEmpty {
-                            Text("“\(note)”")
-                                .font(.yourWords(12.5))
-                                .foregroundStyle(Journal.inkMid)
-                                .lineLimit(1)
-                        } else if let asked = event.metadata["asked"]?
-                            .split(separator: "\n").last {
-                            Text(String(asked))
-                                .font(.yourWords(12.5))
-                                .foregroundStyle(Journal.inkSoft)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.top, Journal.Space.xs)
-    }
-
     private var confirmation: some View {
         HStack(spacing: Journal.Space.s) {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(Journal.pen)
-            Text("Written down.").font(.observed(13)).foregroundStyle(Journal.ink)
+            Text("Written down.").font(.observed(13, weight: .medium)).foregroundStyle(Journal.ink)
             Spacer()
         }
-        .padding(.vertical, Journal.Space.s)
+        .padding(Journal.Space.l)
+        .background(Journal.card)
+    }
+
+    // MARK: - Footer
+
+    private var footerBar: some View {
+        HStack(spacing: Journal.Space.s) {
+            // Where the note will be filed, as the design's project chip.
+            HStack(spacing: 6) {
+                Circle().fill(Journal.pen).frame(width: 7, height: 7)
+                if let place = resolved.place {
+                    Text("Project: \(place.name)")
+                } else {
+                    Text(resolved.appName)
+                }
+            }
+            .font(.observed(11.5))
+            .foregroundStyle(Journal.inkMid)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(Journal.card, in: RoundedRectangle(cornerRadius: Journal.Radius.field))
+            .overlay(RoundedRectangle(cornerRadius: Journal.Radius.field).strokeBorder(Color.black.opacity(0.08), lineWidth: 1))
+
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.shield.fill").font(.system(size: 10))
+                Text("Stays on this Mac")
+            }
+            .font(.observed(11))
+            .foregroundStyle(Journal.inkSoft)
+
+            Spacer()
+
+            Button(action: { if !saving { onFinish() } }) {
+                HStack(spacing: 5) {
+                    Text("Discard").font(.observed(12, weight: .medium)).foregroundStyle(Journal.inkMid)
+                    keycap("Esc")
+                }
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: save) {
+                HStack(spacing: 8) {
+                    Image(systemName: "bookmark.fill").font(.system(size: 11, weight: .semibold))
+                    Text("Remember this").font(.observed(12.5, weight: .semibold))
+                    Text("↵")
+                        .font(.mono(10.5, weight: .regular))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 4))
+                }
+                .foregroundStyle(Journal.onPen)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(Journal.pen, in: RoundedRectangle(cornerRadius: Journal.Radius.card))
+                .shadow(color: Journal.pen.opacity(0.25), radius: 6, y: 2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(saving || saved)
+        }
+        .padding(.horizontal, Journal.Space.l)
+        .padding(.vertical, Journal.Space.m)
+        .background(Journal.paper)
+        .overlay(alignment: .top) { Divider().overlay(Color.black.opacity(0.06)) }
     }
 
     // MARK: - Smart capture
@@ -270,25 +450,42 @@ struct QuickCaptureView: View {
             : "\"\(suggestion.text)\""
     }
 
+    private func suggestionSourceLabel(_ suggestion: CaptureSuggestion) -> String {
+        switch suggestion.source {
+        case .projectNote: "Your project note"
+        case .tabNote: "Your note on this page"
+        case .agentPrompt: "You asked"
+        }
+    }
+
     @ViewBuilder
     private var suggestionRow: some View {
         if canAcceptSuggestion, let suggestion {
-            Button(action: acceptSuggestion) {
-                HStack(spacing: 6) {
-                    Text("💭")
-                    Text(suggestionLabel(suggestion))
-                        .font(.yourWords(12.5))
-                        .foregroundStyle(Journal.inkMid)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text("Tab to use")
-                        .font(.observed(10.5, weight: .medium))
-                        .foregroundStyle(Journal.inkSoft)
+            HStack(spacing: 6) {
+                Text("SUGGESTED · \(suggestionSourceLabel(suggestion).uppercased())")
+                    .font(.caption(10, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(Journal.inkSoft)
+                Button(action: acceptSuggestion) {
+                    HStack(spacing: 4) {
+                        Text("+").font(.observed(11.5, weight: .medium)).foregroundStyle(Journal.pen)
+                        Text(suggestion.text)
+                            .font(.observed(11.5))
+                            .foregroundStyle(Journal.ink)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Journal.paperDeep, in: RoundedRectangle(cornerRadius: Journal.Radius.field))
+                    .overlay(RoundedRectangle(cornerRadius: Journal.Radius.field).strokeBorder(Color.black.opacity(0.05), lineWidth: 1))
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help("Press Tab to fill the field with this, then Return to save")
+                Spacer()
+                Text("Tab to use")
+                    .font(.mono(10))
+                    .foregroundStyle(Journal.inkSoft)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -305,7 +502,12 @@ struct QuickCaptureView: View {
             ?? current?.metadata["cwd"]
             ?? leadingUp.compactMap { $0.metadata["cwd"] }.first
         guard let cwd, !cwd.isEmpty else { return nil }
-        return (try? model.store.projectNote(for: cwd))?.building
+        do {
+            return try model.store.projectNote(for: cwd)?.building
+        } catch {
+            Diagnostics.log("capture: reading the project note failed: \(error)")
+            return nil
+        }
     }
 
     /// The most recent `leadingUp` event with something asked of an agent. Mirrors
@@ -334,8 +536,18 @@ struct QuickCaptureView: View {
 
     private func load() {
         focused = true
-        current = try? model.store.openActivity()
-        leadingUp = (try? model.store.activityLeadingUp(to: Date())) ?? []
+        // A failed read here costs context, not the note: the plan falls back to
+        // opening a fresh span and the save path is unaffected. Logged rather
+        // than surfaced, because a panel that opens with a database error over
+        // it is worse than one that opens with less to say.
+        do {
+            current = try model.store.openActivity()
+            leadingUp = try model.store.activityLeadingUp(to: Date())
+        } catch {
+            Diagnostics.log("capture: reading context failed: \(error)")
+            current = nil
+            leadingUp = []
+        }
         refreshPlan()
         // For a terminal or an editor this is the final answer, so the field is
         // filled before the panel draws rather than a beat later.
@@ -375,7 +587,12 @@ struct QuickCaptureView: View {
                     shownNote = prefill
                 }
                 if let url = identified.url {
-                    tabNote = (try? model.store.noteForTab(url: url)) ?? nil
+                    do {
+                        tabNote = try model.store.noteForTab(url: url)
+                    } catch {
+                        Diagnostics.log("capture: reading this page's note failed: \(error)")
+                        tabNote = nil
+                    }
                     recomputeSuggestion(tabNote: tabNote)
                 }
                 // Everything the note's destination depends on is now known.
@@ -455,6 +672,11 @@ struct QuickCaptureView: View {
         Task { @MainActor in
             defer { saving = false }
             await waitForTab()
+            // The recorder writes spans off the main thread now. If the key was
+            // pressed moments after switching apps, its span for where you are
+            // may still be in flight — planning against the database before it
+            // lands would file the note on the app you just left.
+            await model.recorder.settled()
 
             do {
                 // The load-time span can be seconds stale, and which tab you are

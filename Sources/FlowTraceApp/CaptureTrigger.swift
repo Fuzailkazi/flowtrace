@@ -1,4 +1,5 @@
 import AppKit
+import FlowTraceCore
 import Carbon.HIToolbox
 
 /// A modifier key, distinguished by side.
@@ -60,6 +61,11 @@ enum CaptureTrigger: Equatable, Codable, Sendable {
     /// Accessibility permission and can be triggered accidentally.
     case modifierTap(key: ModifierKey, taps: Int)
 
+    /// The shortcut, unless the user changes it.
+    ///
+    /// ⌥Space, everywhere: the panel's own chip, the empty states, the menu
+    /// bar, Settings and the first-run screen all read this one value, so
+    /// there is no second story to keep in step.
     static let `default` = CaptureTrigger.chord(.default)
 
     var displayString: String {
@@ -80,38 +86,41 @@ enum CaptureTrigger: Equatable, Codable, Sendable {
     // MARK: - Persistence
 
     private static let defaultsKey = "flowtrace.captureTrigger"
-    private static let chosenKey = "flowtrace.captureTriggerChosen"
+    /// Set once, when the stored ⌃⌥N from the old build has been replaced.
+    private static let migratedKey = "flowtrace.captureTrigger.migratedToOptionSpace"
 
-    /// Whether the user has actually picked a shortcut.
+    /// What an earlier build wrote into everyone's defaults, without asking.
     ///
-    /// Nothing is registered until they have. A silent default meant the key that
-    /// opens the note panel was one nobody chose, buried three sections into a
-    /// Settings pane reached through a "More" menu — so it may as well not have
-    /// been configurable at all.
-    static var hasBeenChosen: Bool {
-        UserDefaults.standard.bool(forKey: chosenKey)
-    }
-
-    /// The suggestion offered during setup. Only becomes the shortcut if the user
-    /// accepts it.
-    static let suggestion = CaptureTrigger.chord(HotKeyShortcut(
+    /// It was offered as a "suggestion" and then applied by the first-run screen
+    /// whether or not anybody looked at it, so a stored ⌃⌥N is not evidence of a
+    /// choice — it is the artefact of one never being made. Replaced once, on
+    /// first load, and anyone who actually wants it can record it again.
+    private static let retiredSuggestion = HotKeyShortcut(
         keyCode: UInt32(kVK_ANSI_N),
         carbonModifiers: UInt32(controlKey | optionKey),
         keyLabel: "N"
-    ))
+    )
 
     static func load() -> CaptureTrigger {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: defaultsKey),
               let decoded = try? JSONDecoder().decode(CaptureTrigger.self, from: data)
-        else { return suggestion }
+        else { return .default }
+
+        if !defaults.bool(forKey: migratedKey) {
+            defaults.set(true, forKey: migratedKey)
+            if case .chord(let shortcut) = decoded, shortcut == retiredSuggestion {
+                Diagnostics.log("trigger: replacing the old ⌃⌥N default with ⌥Space")
+                CaptureTrigger.default.save()
+                return .default
+            }
+        }
         return decoded
     }
 
-    /// Persists the choice and records that one was made.
     func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
         UserDefaults.standard.set(data, forKey: Self.defaultsKey)
-        UserDefaults.standard.set(true, forKey: Self.chosenKey)
     }
 }
 

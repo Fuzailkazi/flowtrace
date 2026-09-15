@@ -16,6 +16,17 @@ public struct LiveProject: Identifiable, Sendable {
     /// What you said you were building here, if you've said.
     public var note: ProjectNote?
 
+    public init(
+        path: String, name: String, agents: [LiveAgent], servers: [LiveServer],
+        note: ProjectNote? = nil
+    ) {
+        self.path = path
+        self.name = name
+        self.agents = agents
+        self.servers = servers
+        self.note = note
+    }
+
     /// The most recent sign of life anywhere in this project.
     public var lastActivityAt: Date? {
         agents.compactMap(\.lastActivityAt).max()
@@ -29,11 +40,23 @@ public struct LiveProject: Identifiable, Sendable {
     /// worth surfacing, because it costs you memory and attention and you have
     /// forgotten it exists.
     public var isForgotten: Bool {
-        !agents.isEmpty && agents.allSatisfy { $0.state == .idle }
+        // Judged only on agents FlowTrace was allowed to look at. A hidden
+        // agent carries `.idle` because nothing is known about it, and counting
+        // that as "forgotten" would put a number in the header that is really a
+        // statement about permission.
+        let seen = agents.filter { !$0.transcriptHidden }
+        return !seen.isEmpty && seen.allSatisfy { $0.state == .idle }
     }
 
     /// "4d idle", "just now" — the single word that says whether to care.
     public var statusLabel: String {
+        // First in the chain, and guarded on a non-empty list: hidden agents
+        // carry `.idle`, so without this they would fall through to
+        // "unknown · idle", and without the guard `allSatisfy` would be
+        // vacuously true and a server-only place would lose its own label.
+        if !agents.isEmpty, agents.allSatisfy(\.transcriptHidden) {
+            return "not reading transcripts"
+        }
         if let working = agents.first(where: { $0.state == .working }) {
             return working.lastActivityLabel
         }

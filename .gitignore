@@ -5,3 +5,12 @@ dist/
 .swiftpm/
 .worktrees/
 docs/
+
+# Canonical product docs — local only, not committed (see PRODUCT.md etc.)
+PRODUCT.md
+DECISIONS.md
+CURRENT_STATE.md
+PRODUCT_CONTEXT.md
+RESEARCH.md
+ROADMAP.md
+DESIGN.md

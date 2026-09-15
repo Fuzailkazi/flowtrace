@@ -14,6 +14,8 @@ struct HotKeyShortcut: Equatable, Codable, Sendable {
     /// What to show the user for the non-modifier key, e.g. "Space", "J", "F5".
     var keyLabel: String
 
+    /// ⌥Space. The one shortcut FlowTrace ships with and the one every screen
+    /// names. Changing it is a Settings action; there is no second default.
     static let `default` = HotKeyShortcut(
         keyCode: UInt32(kVK_Space),
         carbonModifiers: UInt32(optionKey),

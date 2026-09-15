@@ -27,9 +27,23 @@ extension LiveStateReader {
     /// Kept off the main `read()` path deliberately: this costs roughly half a
     /// second across three browsers, which is fine occasionally and far too much
     /// at the refresh rate the agent and server lists run at.
-    public func readBrowsers() -> [LiveBrowser] {
+    /// Reads tabs only from browsers that have already been allowed.
+    ///
+    /// `allowed` defaults to true so the CLI is unchanged, where running the
+    /// command is the consent. The app passes false until onboarding is done,
+    /// and then reads only browsers whose Automation status is already
+    /// `.connected` — so no macOS dialog can appear except from Connect.
+    public func readBrowsers(allowed: Bool = true) -> [LiveBrowser] {
+        guard allowed else { return [] }
         let reader = BrowserTabReader()
         return reader.availableBrowsers().map { browser in
+            // Asking a browser that has never been asked is what raises the
+            // dialog; a browser that refused earlier is reported so the user
+            // can fix it in Settings.
+            let access = BrowserAccess.status(for: browser)
+            guard access == .connected else {
+                return LiveBrowser(name: browser.name, needsPermission: access == .denied)
+            }
             do {
                 let tabs = try reader.tabsInFrontWindow(of: browser)
                 return LiveBrowser(name: browser.name, tabs: tabs)
@@ -57,6 +71,10 @@ extension Store {
         url: String, title: String, browser: String, note: String
     ) throws -> ActivityEvent {
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Stored and looked up in the same form, so a page whose address
+        // carries a token still finds the note written against it.
+        let url = Self.storageURL(url) ?? url
+        let title = Self.storageText(title) ?? ""
 
         if let existing = try existingTabEvent(url: url) {
             return try annotate(activityId: existing.id, note: trimmed) ?? existing
@@ -79,7 +97,7 @@ extension Store {
 
     /// The most recent note against a page, whether or not it is still open.
     public func noteForTab(url: String) throws -> String? {
-        try existingTabEvent(url: url)?.note
+        try existingTabEvent(url: Self.storageURL(url) ?? url)?.note
     }
 
     /// Every page you've written about, newest first.

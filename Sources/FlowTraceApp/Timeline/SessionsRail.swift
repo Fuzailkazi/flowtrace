@@ -3,17 +3,19 @@ import FlowTraceCore
 
 /// Everywhere you've been working, grouped by repository.
 ///
-/// This is a rail of *things*, not of filters. The sidebar that used to be here
-/// listed All / Active / Paused / Completed, which told you nothing you didn't
-/// already know; this lists the sessions and repositories the day actually
-/// touched, so glancing left answers "what am I in the middle of".
+/// A row of *things*, not of filters: the repositories the day's coding sessions
+/// actually touched, with the branch and how much is uncommitted. Glancing at it
+/// answers "what am I in the middle of". It used to be a sidebar; the shell
+/// owns the sidebar now, so this sits under the day's activity strip.
 struct SessionsRail: View {
     @Bindable var model: AppModel
     let day: Date
     var onSelect: (ActivityEvent) -> Void
 
     @State private var groups: [RepoGroup] = []
-    @State private var expanded: Set<String> = []
+    /// A failed read. This rail collapses to nothing when it has no groups, so
+    /// without this a broken read is completely invisible.
+    @State private var failure: String?
 
     struct RepoGroup: Identifiable {
         var id: String { name }
@@ -28,138 +30,92 @@ struct SessionsRail: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                heading
-
-                if groups.isEmpty {
-                    Text("No coding sessions on this day.")
-                        .font(.observed(12))
+        Group {
+            if let failure {
+                LoadFailureLine(message: "Couldn't read where you worked — \(failure)")
+            } else if groups.isEmpty {
+                // Nothing to say, and nothing to take up room saying it.
+                Color.clear.frame(height: 0)
+            } else {
+                VStack(alignment: .leading, spacing: Journal.Space.s) {
+                    Text("WHERE YOU WORKED")
+                        .font(.caption())
+                        .tracking(1.0)
                         .foregroundStyle(Journal.inkSoft)
-                        .padding(.horizontal, Journal.Space.m)
-                        .padding(.top, Journal.Space.s)
-                } else {
-                    ForEach(groups) { group in
-                        repoBlock(group)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: Journal.Space.s) {
+                            ForEach(groups) { group in
+                                repoChip(group)
+                            }
+                        }
+                        .padding(.vertical, 2)
                     }
                 }
             }
-            .padding(.bottom, Journal.Space.l)
         }
-        .background(Journal.paperDeep)
         .task(id: day) { load() }
         .onChange(of: model.activityRevision) { _, _ in load() }
     }
 
-    private var heading: some View {
-        HStack {
-            Text("Where you worked")
-                .font(.observed(10.5, weight: .semibold))
-                .tracking(1.2)
-                .foregroundStyle(Journal.inkSoft)
-            Spacer()
-        }
-        .padding(.horizontal, Journal.Space.m)
-        .padding(.top, Journal.Space.l)
-        .padding(.bottom, Journal.Space.s)
-    }
-
     // MARK: - One repository
 
-    private func repoBlock(_ group: RepoGroup) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                toggle(group.name)
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: Journal.Space.s) {
-                    Image(systemName: expanded.contains(group.name)
-                          ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(Journal.inkSoft)
-                        .frame(width: 9)
+    private func repoChip(_ group: RepoGroup) -> some View {
+        Button {
+            // The newest session is the one you are most likely to be in.
+            if let newest = group.sessions.first { onSelect(newest) }
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: Journal.Space.s) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Journal.pen)
+                    Text(group.name)
+                        .font(.observed(13, weight: .semibold))
+                        .foregroundStyle(Journal.ink)
+                        .lineLimit(1)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(group.name)
-                            .font(.observed(13, weight: .semibold))
-                            .foregroundStyle(Journal.ink)
-                            .lineLimit(1)
+                    Spacer(minLength: Journal.Space.s)
 
-                        HStack(spacing: 5) {
-                            if let branch = group.branch {
-                                Text(branch).lineLimit(1)
-                            }
-                            if let dirty = group.dirtyCount, dirty > 0 {
-                                if group.branch != nil { Text("·") }
-                                Text("\(dirty) uncommitted").foregroundStyle(Journal.amber)
-                            }
-                        }
-                        .font(.observed(10.5))
-                        .foregroundStyle(Journal.inkSoft)
-                    }
-
-                    Spacer(minLength: 4)
-
-                    Text("\(group.sessions.count)")
+                    Text("\(group.sessions.count) session\(group.sessions.count == 1 ? "" : "s")")
                         .font(.observed(10.5, weight: .medium))
                         .foregroundStyle(Journal.pen)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .padding(.horizontal, 6).padding(.vertical, 1.5)
                         .background(Journal.penSoft, in: Capsule())
                 }
-                .padding(.horizontal, Journal.Space.m)
-                .padding(.vertical, Journal.Space.s)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
 
-            if expanded.contains(group.name) {
-                ForEach(group.sessions) { session in
-                    sessionRow(session)
-                }
-            }
-        }
-        .overlay(alignment: .bottom) {
-            Divider().overlay(Journal.rule).padding(.horizontal, Journal.Space.m)
-        }
-    }
-
-    /// A session is worth listing only if you can tell what it was about.
-    private func sessionRow(_ session: ActivityEvent) -> some View {
-        Button {
-            onSelect(session)
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.metadata["about"] ?? "\(session.appName) session")
-                    .font(.observed(12))
-                    .foregroundStyle(Journal.inkMid)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-
-                HStack(spacing: 5) {
-                    Text(session.startedAt, format: .dateTime.hour().minute())
-                        .monospacedDigit()
-                    if let messages = session.metadata["messages"] {
-                        Text("·")
-                        Text("\(messages) messages")
+                HStack(spacing: 6) {
+                    if let branch = group.branch {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 9))
+                        Text(branch)
+                            .font(.mono(10.5))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
-                    if let note = session.note, !note.isEmpty {
-                        Text("·")
-                        Image(systemName: "quote.opening").font(.system(size: 7))
+                    if let dirty = group.dirtyCount, dirty > 0 {
+                        if group.branch != nil { Text("·") }
+                        Text("\(dirty) uncommitted")
+                            .font(.observed(10.5, weight: .medium))
+                            .foregroundStyle(Journal.amber)
+                    }
+                    if group.branch == nil && (group.dirtyCount ?? 0) == 0 {
+                        Text(group.sessions.first?.startedAt ?? day,
+                             format: .dateTime.hour().minute())
+                            .font(.mono(10.5))
                     }
                 }
-                .font(.observed(10))
                 .foregroundStyle(Journal.inkSoft)
             }
-            .padding(.leading, Journal.Space.m + 17)
-            .padding(.trailing, Journal.Space.m)
-            .padding(.vertical, 5)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .padding(.horizontal, Journal.Space.m)
+            .padding(.vertical, 10)
+            .frame(minWidth: 180, maxWidth: 260, alignment: .leading)
+            .background(Journal.card, in: RoundedRectangle(cornerRadius: Journal.Radius.card))
+            .shadow(color: .black.opacity(0.03), radius: 6, y: 2)
+            .contentShape(RoundedRectangle(cornerRadius: Journal.Radius.card))
         }
         .buttonStyle(.plain)
-    }
-
-    private func toggle(_ name: String) {
-        if expanded.contains(name) { expanded.remove(name) } else { expanded.insert(name) }
+        .help(group.path ?? group.name)
     }
 
     // MARK: - Data
@@ -167,8 +123,15 @@ struct SessionsRail: View {
     private func load() {
         // The rail wants sessions whether or not you wrote about them, so it asks
         // for the raw record rather than the written-only timeline.
-        let events = ((try? model.store.allActivity(on: day, minimumSeconds: 0)) ?? [])
-            .filter { $0.kind == .agentSession }
+        let events: [ActivityEvent]
+        do {
+            events = try model.store.allActivity(on: day, minimumSeconds: 0)
+                .filter { $0.kind == .agentSession }
+            failure = nil
+        } catch {
+            failure = error.localizedDescription
+            return
+        }
 
         let byRepo = Dictionary(grouping: events) { $0.target ?? "elsewhere" }
         var built = byRepo.map { name, sessions in
@@ -182,9 +145,6 @@ struct SessionsRail: View {
         }
         built.sort { $0.lastAt > $1.lastAt }
         groups = built
-
-        // Most recent repository opens by default — the one you're likely in.
-        if expanded.isEmpty, let first = built.first { expanded.insert(first.name) }
 
         enrichWithGit(built)
     }

@@ -117,15 +117,32 @@ public struct ClaudeCodeAdapter: AgentAdapter {
 
             switch object["type"] as? String {
             case "ai-title":
-                if let value = object["aiTitle"] as? String, !value.isEmpty { title = value }
+                // Claude writes this title from the conversation, so it can
+                // repeat a key that was pasted into it.
+                if let value = object["aiTitle"] as? String, !value.isEmpty {
+                    title = Redaction.redact(value).text
+                }
             case "user":
                 guard object["isSidechain"] as? Bool != true else { continue }
                 // `isMeta` marks content Claude Code injected on the user's
                 // behalf — skill bodies, slash-command expansions. It looks like
                 // a user turn but nobody typed it.
                 guard object["isMeta"] as? Bool != true else { continue }
-                guard let text = Self.userText(from: object["message"]) else { continue }
+                guard let raw = Self.userText(from: object["message"]) else { continue }
+
+                // The choke point. Everything downstream of this line — the scan
+                // cache, proposals, threads, the timeline, the search index, the
+                // brief, Now and the CLI — receives text that has already been
+                // through here, so none of them has to remember to filter.
+                //
+                // The message is counted before the check: a turn that was only
+                // a pasted key still happened, and the count is how the UI says
+                // how much was said.
                 messageCount += 1
+                let redacted = Redaction.redact(raw)
+                guard !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty else { continue }
+                let text = redacted.text
+
                 if firstPrompt == nil { firstPrompt = text }
                 lastPrompt = text
                 if AgentSession.isSubstantive(text) {

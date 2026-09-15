@@ -7,8 +7,12 @@ import Foundation
 /// Written to a file rather than the console because the interesting events
 /// happen while another app is frontmost, with no debugger attached.
 public enum Diagnostics {
+    /// Where the log lives. Injectable so tests that exercise the delete
+    /// controls write to a scratch directory rather than removing the real one.
+    public nonisolated(unsafe) static var directory: URL = FlowTraceDatabase.supportDirectory
+
     public static var fileURL: URL {
-        FlowTraceDatabase.supportDirectory.appendingPathComponent("debug.log")
+        directory.appendingPathComponent("debug.log")
     }
 
     private static let queue = DispatchQueue(label: "ai.flowtrace.diagnostics")
@@ -36,6 +40,16 @@ public enum Diagnostics {
         }
     }
 
+    /// How much the log is holding, for the holdings list.
+    public static func sizeInBytes() -> Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64)
+            .flatMap { $0 } ?? 0
+    }
+
+    /// Removes the log.
+    ///
+    /// The observable promise is "emptied or gone": `log` appends on its own
+    /// queue, so a line written a moment after this can recreate the file.
     public static func clear() {
         try? FileManager.default.removeItem(at: fileURL)
     }

@@ -21,21 +21,74 @@ public struct LiveStateReader: Sendable {
             .appendingPathComponent(".claude/projects", isDirectory: true)
     }
 
-    public func read() -> LiveState {
-        LiveState(agents: readAgents(), servers: readServers(), capturedAt: Date())
+    /// What is running, and — for the agents whose transcripts may be read —
+    /// what was last asked of each.
+    ///
+    /// `transcripts` is the permission, passed in rather than looked up. With
+    /// `.none` this still reports every running agent and server: those come
+    /// from `pgrep` and `lsof`, which open no file. What it will not do is read
+    /// a single transcript, or even list the directory they live in, since the
+    /// file names are session identifiers.
+    public func read(transcripts: AgentSources = .all) -> LiveState {
+        LiveState(
+            agents: readAgents(transcripts: transcripts),
+            servers: readServers(),
+            capturedAt: Date()
+        )
+    }
+
+    /// Why a census could not be taken. Reported rather than rounded down to
+    /// zero: "nothing is running" and "I could not look" are different claims,
+    /// and only one of them is ever true by accident.
+    public struct CensusUnavailable: LocalizedError, Sendable {
+        public let reason: String
+        public var errorDescription: String? { reason }
+    }
+
+    /// How much is running, without opening a single transcript.
+    ///
+    /// `readAgents()` answers the same question better, but it gets its answer
+    /// by reading the files consent is about. This counts processes and
+    /// listening sockets and stops there, so first run can say something true
+    /// before the user has agreed to anything.
+    ///
+    /// Counts processes whether or not their working directory resolves, which
+    /// `runningProcesses(named:)` drops — for a count, an agent whose cwd `lsof`
+    /// cannot see is still an agent.
+    public func readCensus() throws -> (agents: Int, servers: Int) {
+        var pids = Set<Int32>()
+        var asked = false
+        var failure = "pgrep could not be run"
+
+        for name in ["claude", "codex", "opencode"] {
+            let result = Shell.run("/usr/bin/pgrep", ["-x", name])
+            // 0 = matches, 1 = no matches; both are answers. Anything negative
+            // is this process failing to ask the question at all.
+            guard result.status >= 0 else {
+                let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !stderr.isEmpty { failure = stderr }
+                continue
+            }
+            asked = true
+            for line in result.stdout.split(separator: "\n") {
+                if let pid = Int32(line.trimmingCharacters(in: .whitespaces)) { pids.insert(pid) }
+            }
+        }
+
+        guard asked else { throw CensusUnavailable(reason: failure) }
+        return (pids.count, readServers().count)
     }
 
     // MARK: - Agents
 
-    public func readAgents() -> [LiveAgent] {
-        let processes = runningProcesses(named: ["claude", "codex"])
+    public func readAgents(transcripts: AgentSources = .all) -> [LiveAgent] {
+        let processes = runningProcesses(named: ["claude", "codex", "opencode"])
         var agents: [LiveAgent] = []
         // Several agents usually sit in the same handful of repositories, and
         // each resolution is a subprocess.
         var topLevels: [String: String] = [:]
 
         for process in processes {
-            let agent: AgentName = process.command.contains("codex") ? .codex : .claudeCode
             let top: String?
             if let memo = topLevels[process.workingDirectory] {
                 top = memo
@@ -43,42 +96,11 @@ public struct LiveStateReader: Sendable {
                 top = git.topLevel(of: process.workingDirectory)
                 if let top { topLevels[process.workingDirectory] = top }
             }
-            let root = top ?? process.workingDirectory
-
-            var live = LiveAgent(
-                pid: process.pid,
-                agent: agent,
-                workingDirectory: process.workingDirectory,
-                projectRoot: FilePathCanon.canonical(root),
-                repositoryName: SessionImporter.folderLabel(for: root),
-                state: .idle
-            )
-
-            if let transcript = newestTranscript(for: process.workingDirectory) {
-                live.lastActivityAt = transcript.modifiedAt
-                live.sessionId = (transcript.path as NSString)
-                    .lastPathComponent
-                    .replacingOccurrences(of: ".jsonl", with: "")
-
-                let age = Date().timeIntervalSince(transcript.modifiedAt)
-                live.state = age < workingWindow ? .working
-                           : age < waitingWindow ? .waiting
-                           : .idle
-
-                if let prompt = lastPrompt(in: transcript.path) {
-                    // A dragged file pastes its path as the prompt; the sentence
-                    // after it is the part worth showing.
-                    let stripped = AgentSession.withoutLeadingPath(prompt)
-                    // Prompts are free text and routinely contain pasted keys.
-                    let redacted = Redaction.redact(stripped.isEmpty ? prompt : stripped)
-                    if !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty {
-                        live.lastPrompt = AgentSession.condense(redacted.text, limit: 90)
-                    }
-                }
-            }
-
-            agents.append(live)
+            agents.append(agent(
+                for: process, root: top ?? process.workingDirectory, transcripts: transcripts
+            ))
         }
+
 
         // Several processes share one working directory — the CLI spawns helpers —
         // so collapse to one entry per place you are actually working.
@@ -86,6 +108,74 @@ public struct LiveStateReader: Sendable {
         return agents
             .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
             .filter { seen.insert("\($0.agent.rawValue):\($0.workingDirectory)").inserted }
+    }
+
+
+    /// Resolves one running process into what is known about it.
+    ///
+    /// Public so the permission can be tested without live processes. `root` is
+    /// supplied rather than resolved here because the caller memoises git
+    /// top-levels across processes.
+    public func agent(
+        for process: RunningProcess, root: String, transcripts: AgentSources
+    ) -> LiveAgent {
+        let agent: AgentName
+        if process.command.contains("codex") {
+            agent = .codex
+        } else if process.command.contains("opencode") {
+            agent = .openCode
+        } else {
+            agent = .claudeCode
+        }
+
+        var live = LiveAgent(
+            pid: process.pid,
+            agent: agent,
+            workingDirectory: process.workingDirectory,
+            projectRoot: FilePathCanon.canonical(root),
+            repositoryName: SessionImporter.folderLabel(for: root),
+            state: .idle
+        )
+
+        guard transcripts.allows(agent) else {
+            // Not allowed to look. Nothing is opened and the directory is
+            // not even listed — its file names are session identifiers.
+            live.transcriptHidden = true
+            return live
+        }
+
+        if let transcript = newestTranscript(for: process.workingDirectory) {
+            live.lastActivityAt = transcript.modifiedAt
+            live.sessionId = (transcript.path as NSString)
+                .lastPathComponent
+                .replacingOccurrences(of: ".jsonl", with: "")
+
+            let age = Date().timeIntervalSince(transcript.modifiedAt)
+            live.state = age < workingWindow ? .working
+                   : age < waitingWindow ? .waiting
+                   : .idle
+
+            if agent != .openCode, let prompt = lastPrompt(in: transcript.path) {
+                // A dragged file pastes its path as the prompt; the sentence
+                // after it is the part worth showing.
+                let stripped = AgentSession.withoutLeadingPath(prompt)
+                // Prompts are free text and routinely contain pasted keys.
+                let redacted = Redaction.redact(stripped.isEmpty ? prompt : stripped)
+                if !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty {
+                live.lastPrompt = AgentSession.condense(redacted.text, limit: 90)
+                }
+            }
+        } else {
+            // The process is running right now (pgrep found it) but has no
+            // readable transcript — true for OpenCode, which keeps no
+            // Claude-style session store. Claiming `.idle` would file it as
+            // "forgotten for days"; `.waiting` says honestly: running,
+            // sitting waiting for you, activity unknown.
+            live.state = .waiting
+        }
+
+
+        return live
     }
 
     // MARK: - Servers
@@ -142,10 +232,16 @@ public struct LiveStateReader: Sendable {
 
     // MARK: - Process inspection
 
-    struct RunningProcess {
-        var pid: Int32
-        var command: String
-        var workingDirectory: String
+    public struct RunningProcess: Sendable {
+        public var pid: Int32
+        public var command: String
+        public var workingDirectory: String
+
+        public init(pid: Int32, command: String, workingDirectory: String) {
+            self.pid = pid
+            self.command = command
+            self.workingDirectory = workingDirectory
+        }
     }
 
     /// Finds every running agent, then resolves their working directories.

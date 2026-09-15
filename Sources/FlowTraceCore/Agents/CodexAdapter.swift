@@ -87,7 +87,9 @@ public struct CodexAdapter: AgentAdapter {
                   let name = object["thread_name"] as? String,
                   !name.isEmpty
             else { continue }
-            titles[id] = name
+            // Codex names a thread after the conversation, so the name can
+            // carry whatever was pasted into it.
+            titles[id] = Redaction.redact(name).text
         }
         return titles
     }
@@ -130,8 +132,17 @@ public struct CodexAdapter: AgentAdapter {
                 id = payload["id"] as? String
                 cwd = payload["cwd"] as? String
             case "event_msg" where payload["type"] as? String == "user_message":
-                guard let text = Self.cleanPrompt(payload["message"] as? String) else { continue }
+                guard let raw = Self.cleanPrompt(payload["message"] as? String) else { continue }
+
+                // The choke point, as in the Claude adapter: prompts are
+                // redacted as they are parsed, so nothing downstream — cache,
+                // proposals, threads, index, brief — ever sees the raw text.
+                // Counted before the check, because the turn happened.
                 messageCount += 1
+                let redacted = Redaction.redact(raw)
+                guard !Redaction.isOnlyRedactions(redacted), !redacted.isEmpty else { continue }
+                let text = redacted.text
+
                 if firstPrompt == nil { firstPrompt = text }
                 lastPrompt = text
                 if AgentSession.isSubstantive(text) {

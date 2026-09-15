@@ -1,0 +1,5 @@
+{"type":"user","cwd":"/Users/dev/keys","gitBranch":"main","timestamp":"2026-07-14T09:00:00.000Z","message":{"role":"user","content":"set up billing with sk_live_0123456789abcdefgh and tell me if it works"}}
+{"type":"assistant","timestamp":"2026-07-14T09:00:05.000Z","message":{"role":"assistant","content":"done"}}
+{"type":"user","cwd":"/Users/dev/keys","timestamp":"2026-07-14T09:01:00.000Z","message":{"role":"user","content":"github_pat_0123456789abcdefghij"}}
+{"type":"user","cwd":"/Users/dev/keys","timestamp":"2026-07-14T09:02:00.000Z","message":{"role":"user","content":"now deploy the staging environment and watch the logs"}}
+{"type":"ai-title","timestamp":"2026-07-14T09:03:00.000Z","aiTitle":"Billing with sk_live_0123456789abcdefgh"}

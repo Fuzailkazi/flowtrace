@@ -34,7 +34,7 @@ struct ShortcutRecorder: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             } else if shortcut != .default {
-                Button("Reset") {
+                Button("Reset to ⌥Space") {
                     shortcut = .default
                     onRecorded?()
                 }

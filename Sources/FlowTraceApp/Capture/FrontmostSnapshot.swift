@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import FlowTraceCore
 
 /// Where you were the instant you pressed the key.
@@ -10,6 +11,12 @@ struct FrontmostSnapshot: Equatable {
     var bundleIdentifier: String?
     var pageTitle: String?
     var url: String?
+    /// The focused window's title, read synchronously via Accessibility at
+    /// key-press time. This is what makes the panel open *with* context —
+    /// "XYZ video - YouTube" or "flowtrace — Code" — instead of a bare "Brave"
+    /// that fills in a beat later once AppleScript returns. Nil when the
+    /// permission isn't granted; never prompts.
+    var windowTitle: String?
 
     /// How many tabs are open in that window — the difference between "you were
     /// on this page" and "you were on this page with eleven others".
@@ -41,6 +48,7 @@ struct FrontmostSnapshot: Equatable {
     /// One line describing where the user is, for the top of the panel.
     var summary: String {
         if let pageTitle, !pageTitle.isEmpty { return pageTitle }
+        if let windowTitle, !windowTitle.isEmpty { return windowTitle }
         if let url { return url }
         // The project an editor has in front, in the slot a page title occupies
         // for a browser: `flowtrace` rather than `Code`.
@@ -60,10 +68,35 @@ struct FrontmostSnapshot: Equatable {
 
     static func capture() -> FrontmostSnapshot {
         let app = NSWorkspace.shared.frontmostApplication
+        let bundleId = app?.bundleIdentifier
+        let windowTitle = focusedWindowTitle(of: app)
         return FrontmostSnapshot(
             appName: app?.localizedName ?? "Unknown app",
-            bundleIdentifier: app?.bundleIdentifier
+            bundleIdentifier: bundleId,
+            // Instant context: the window title is already the YouTube video
+            // name or the editor file. The async tab read refines it with URL
+            // a beat later; until then this is what the panel shows and where
+            // the note lands.
+            pageTitle: windowTitle,
+            windowTitle: windowTitle
         )
+    }
+
+    /// Synchronous window-title read at key-press time. Pull, never watch:
+    /// returns nil when Accessibility isn't granted and never prompts.
+    private static func focusedWindowTitle(of app: NSRunningApplication?) -> String? {
+        guard let app, AXIsProcessTrusted() else { return nil }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        var windowRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, kAXFocusedWindowAttribute as CFString, &windowRef
+        ) == .success, let windowRef else { return nil }
+        var titleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            windowRef as! AXUIElement, kAXTitleAttribute as CFString, &titleRef
+        ) == .success, let title = titleRef as? String else { return nil }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// The rules in `FlowTraceCore` decide where a note lands; this is what
