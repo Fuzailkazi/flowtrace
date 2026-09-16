@@ -105,7 +105,23 @@ struct FrontmostSnapshot: Equatable {
     /// Synchronous window-title read at key-press time. Pull, never watch:
     /// returns nil when Accessibility isn't granted and never prompts.
     private static func focusedWindowTitle(of app: NSRunningApplication?) -> String? {
-        guard let app, AXIsProcessTrusted() else { return nil }
+        guard let app else { return nil }
+        // The window server exposes the frontmost on-screen window title
+        // without Accessibility. This keeps ordinary captures useful even
+        // when TCC has invalidated the app's AX grant after an ad-hoc rebuild.
+        let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]]
+        if let title = windows?
+            .first(where: {
+                ($0[kCGWindowOwnerPID as String] as? Int == Int(app.processIdentifier))
+                    && (($0[kCGWindowLayer as String] as? Int) ?? 1) == 0
+            })?[kCGWindowName as String] as? String {
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+
+        guard AXIsProcessTrusted() else { return nil }
         let element = AXUIElementCreateApplication(app.processIdentifier)
         var windowRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
