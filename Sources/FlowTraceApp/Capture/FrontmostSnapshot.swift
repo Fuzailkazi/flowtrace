@@ -140,6 +140,7 @@ struct FrontmostSnapshot: Equatable {
     var site: CaptureSite {
         CaptureSite(
             appName: appName, bundleIdentifier: bundleIdentifier, pageTitle: pageTitle,
+            windowTitle: windowTitle,
             url: url, openTabCount: openTabCount, isBrowser: isBrowser,
             automationDenied: automationDenied,
             // The recalled place takes precedence over anything an editor said,
@@ -173,6 +174,7 @@ struct FrontmostSnapshot: Equatable {
             if let tab = try BrowserTabReader().activeTab(of: browser) {
                 resolved.pageTitle = tab.pageTitle
                 resolved.url = tab.url
+                if let title = tab.windowTitle, !title.isEmpty { resolved.windowTitle = title }
             }
         } catch let error as BrowserReadError {
             if case .permissionDenied = error { resolved.automationDenied = true }

@@ -729,7 +729,7 @@ struct QuickCaptureView: View {
 
         case .annotateOpen(let open, let url, let title, let place):
             try annotate(
-                open, with: text, at: now, backfill: (url: url, title: title), place: place
+                open, with: text, at: now, backfill: (url: url, title: title, windowTitle: resolved.windowTitle), place: place
             )
 
         case .beginSpan(let event):
@@ -742,7 +742,7 @@ struct QuickCaptureView: View {
             // alt-tab to Slack and back would throw a freshly resolved place away.
             let target = try model.store.beginActivity(event)
             try annotate(
-                target, with: text, at: now, backfill: (url: nil, title: nil),
+                target, with: text, at: now, backfill: (url: nil, title: nil, windowTitle: resolved.windowTitle),
                 place: resolved.site.placeBackfill
             )
         }
@@ -757,7 +757,7 @@ struct QuickCaptureView: View {
     /// page happens to be in front now.
     private func annotate(
         _ target: ActivityEvent, with text: String, at now: Date,
-        backfill: (url: String?, title: String?), place: PlaceBackfill
+        backfill: (url: String?, title: String?, windowTitle: String?), place: PlaceBackfill
     ) throws {
         // Already said, nothing to do — accepting a suggestion sourced from this
         // very page arrives here. No back-fill either: the row already carries
@@ -777,6 +777,9 @@ struct QuickCaptureView: View {
             try model.store.describeActivity(
                 id: target.id, target: backfill.title, url: backfill.url
             )
+        }
+        if let title = backfill.windowTitle, !title.isEmpty {
+            try model.store.describeActivity(id: target.id, metadata: ["windowTitle": title])
         }
 
         // Same path and same rule: the place is only ever said about a row this
@@ -823,6 +826,7 @@ struct QuickCaptureView: View {
                 var metadata: [String: String] = [:]
                 if let name = site.placeName { metadata["place"] = name }
                 if let root = site.placeRoot { metadata["cwd"] = root }
+                if let title = site.windowTitle, !title.isEmpty { metadata["windowTitle"] = title }
                 return metadata
             }()
         ))

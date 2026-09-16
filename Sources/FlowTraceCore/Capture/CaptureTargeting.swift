@@ -8,6 +8,7 @@ public struct CaptureSite: Sendable, Equatable {
     public var appName: String
     public var bundleIdentifier: String?
     public var pageTitle: String?
+    public var windowTitle: String?
     public var url: String?
     public var openTabCount: Int
     /// A browser FlowTrace knows how to read. With `url == nil` this means the
@@ -36,6 +37,7 @@ public struct CaptureSite: Sendable, Equatable {
 
     public init(
         appName: String, bundleIdentifier: String? = nil, pageTitle: String? = nil,
+        windowTitle: String? = nil,
         url: String? = nil, openTabCount: Int = 0, isBrowser: Bool = false,
         automationDenied: Bool = false, placeName: String? = nil, placeRoot: String? = nil,
         isEditor: Bool = false, placeChecked: Bool = false
@@ -43,6 +45,7 @@ public struct CaptureSite: Sendable, Equatable {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.pageTitle = pageTitle
+        self.windowTitle = windowTitle
         self.url = url
         self.openTabCount = openTabCount
         self.isBrowser = isBrowser
@@ -194,6 +197,7 @@ public enum CaptureTargeting {
                 if site.openTabCount > 1 { metadata["tabsOpen"] = String(site.openTabCount) }
                 if let name = site.placeName { metadata["place"] = name }
                 if let root = site.placeRoot { metadata["cwd"] = root }
+                if let title = site.windowTitle, !title.isEmpty { metadata["windowTitle"] = title }
                 return metadata
             }()
         )

@@ -223,6 +223,11 @@ struct MemoryDetailView: View {
                         .frame(maxWidth: 260)
                         .help(cwd)
                 }
+                if let windowTitle = event.metadata["windowTitle"], !windowTitle.isEmpty {
+                    WashChip(windowTitle, fill: Journal.card, ink: Journal.inkMid) {
+                        Image(systemName: "doc.text").font(.system(size: 10, weight: .semibold))
+                    }
+                }
                 if event.kind != .agentSession, let messages = event.metadata["messages"], !messages.isEmpty {
                     WashChip("\(messages) message\(messages == "1" ? "" : "s")", mono: true, fill: Journal.card)
                 }
