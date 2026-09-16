@@ -86,35 +86,14 @@ enum CaptureTrigger: Equatable, Codable, Sendable {
     // MARK: - Persistence
 
     private static let defaultsKey = "flowtrace.captureTrigger"
-    /// Set once, when the stored ⌃⌥N from the old build has been replaced.
-    private static let migratedKey = "flowtrace.captureTrigger.migratedToOptionSpace"
-
-    /// What an earlier build wrote into everyone's defaults, without asking.
-    ///
-    /// It was offered as a "suggestion" and then applied by the first-run screen
-    /// whether or not anybody looked at it, so a stored ⌃⌥N is not evidence of a
-    /// choice — it is the artefact of one never being made. Replaced once, on
-    /// first load, and anyone who actually wants it can record it again.
-    private static let retiredSuggestion = HotKeyShortcut(
-        keyCode: UInt32(kVK_ANSI_N),
-        carbonModifiers: UInt32(controlKey | optionKey),
-        keyLabel: "N"
-    )
-
     static func load() -> CaptureTrigger {
         let defaults = UserDefaults.standard
         guard let data = defaults.data(forKey: defaultsKey),
               let decoded = try? JSONDecoder().decode(CaptureTrigger.self, from: data)
         else { return .default }
 
-        if !defaults.bool(forKey: migratedKey) {
-            defaults.set(true, forKey: migratedKey)
-            if case .chord(let shortcut) = decoded, shortcut == retiredSuggestion {
-                Diagnostics.log("trigger: replacing the old ⌃⌥N default with ⌥Space")
-                CaptureTrigger.default.save()
-                return .default
-            }
-        }
+        // A stored chord may be an explicit user choice, even when it matches
+        // a former default. Defaults only apply when no saved trigger exists.
         return decoded
     }
 

@@ -15,12 +15,9 @@ final class QuickCapturePanel: NSPanel {
     init(content: NSView) {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: QuickCapturePanel.width, height: 420),
-            // Deliberately *not* .nonactivatingPanel. That flag stops the panel
-            // becoming key even when the app is activated, which showed up in the
-            // log as "key: false" — the panel appeared and then silently refused
-            // every keystroke. Focus is handed back to the previous app on close,
-            // which gets the same result without the flag.
-            styleMask: [.titled, .fullSizeContentView],
+            // Take keyboard focus without activating FlowTrace and raising its
+            // workspace behind the panel. Set this at creation, not afterwards.
+            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -110,14 +107,8 @@ final class QuickCaptureController {
         panel.positionOverActiveScreen()
         self.panel = panel
 
-        // FlowTrace is LSUIElement (menu-bar resident, no dock icon), so it is
-        // not a "regular" app — but its panel still cannot take keyboard focus
-        // while another app is active, however floating the panel is. Without
-        // activating first, the panel appears but refuses to accept keystrokes.
-        //
-        // Activating shows the panel only: the main window is never ordered
-        // front, and focus is handed straight back on dismiss.
-        NSApp.activate(ignoringOtherApps: true)
+        // A nonactivating NSPanel can become key while the previous app stays
+        // active. Activating NSApp here would also raise its workspace.
         panel.makeKeyAndOrderFront(nil)
 
         // Key status is not settled synchronously, so a reading taken here is
@@ -125,7 +116,6 @@ final class QuickCaptureController {
         DispatchQueue.main.async { [weak self] in
             guard let panel = self?.panel else { return }
             if !panel.isKeyWindow {
-                NSApp.activate(ignoringOtherApps: true)
                 panel.makeKey()
             }
             // Read again once the window server has settled. The immediate

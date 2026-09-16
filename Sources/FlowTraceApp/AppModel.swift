@@ -250,8 +250,7 @@ final class AppModel {
         }
     }
 
-    /// Bumped whenever the day changes, so the timeline and the rail refresh
-    /// together without either polling the other.
+    /// Bumped after captures and imports so saved-note views refresh together.
     var activityRevision = 0
 
     /// Folds today's agent transcripts into the day. Cheap and idempotent, so it

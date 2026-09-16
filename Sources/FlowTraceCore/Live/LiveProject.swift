@@ -16,6 +16,25 @@ public struct LiveProject: Identifiable, Sendable {
     /// What you said you were building here, if you've said.
     public var note: ProjectNote?
 
+    /// The first useful paragraph from the project's README, used as a
+    /// grounded fallback when nobody has written a project note yet.
+    public var readmeBrief: String? {
+        for filename in ["README.md", "README", "readme.md", "Readme.md"] {
+            let url = URL(fileURLWithPath: path).appendingPathComponent(filename)
+            guard let raw = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let paragraphs = raw.components(separatedBy: "\n\n").map {
+                $0.split(separator: "\n").joined(separator: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let paragraph = paragraphs.first(where: {
+                !$0.isEmpty && !$0.hasPrefix("#") && $0.count > 20
+            }) {
+                return String(paragraph.prefix(220))
+            }
+        }
+        return nil
+    }
+
     public init(
         path: String, name: String, agents: [LiveAgent], servers: [LiveServer],
         note: ProjectNote? = nil

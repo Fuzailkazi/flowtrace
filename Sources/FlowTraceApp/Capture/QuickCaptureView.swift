@@ -684,6 +684,7 @@ struct QuickCaptureView: View {
                 refreshPlan()
                 try write(text)
 
+                model.activityRevision &+= 1
                 model.refresh()
                 saved = true
                 try? await Task.sleep(for: .milliseconds(600))

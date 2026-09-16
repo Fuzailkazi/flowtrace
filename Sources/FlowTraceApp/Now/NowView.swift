@@ -122,6 +122,9 @@ struct NowView: View {
         .onChange(of: model.consent) { _, _ in
             Task { await refresh(); await refreshBrowsers() }
         }
+        .onChange(of: model.activityRevision) { _, _ in
+            Task { await refreshBrowsers() }
+        }
         .onReceive(tick) { _ in Task { await refresh() } }
         .onReceive(browserTick) { _ in Task { await refreshBrowsers() } }
     }
@@ -343,9 +346,29 @@ struct NowView: View {
             } else if !building.isEmpty {
                 Text("“\(building)”")
                     .font(.yourWords(15))
-                    .foregroundStyle(Journal.ink)
-                    .onTapGesture { begin(path: project.path, existing: building) }
+                .foregroundStyle(Journal.ink)
+                .onTapGesture { begin(path: project.path, existing: building) }
+            } else if let brief = project.readmeBrief {
+                contextLine(label: "project brief", text: brief)
             }
+
+            if let prompt = project.lastPrompt, !prompt.isEmpty {
+                contextLine(label: "last instruction", text: oneLine(prompt))
+            }
+        }
+    }
+
+    private func contextLine(label: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.caption(9))
+                .tracking(0.8)
+                .foregroundStyle(Journal.inkSoft)
+            Text(text)
+                .font(.observed(12.5))
+                .foregroundStyle(Journal.inkMid)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
