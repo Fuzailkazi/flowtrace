@@ -24,6 +24,7 @@ struct NowView: View {
     @State private var ignored: Set<String> = []
     @State private var browsers: [LiveBrowser] = []
     @State private var tabNotes: [String: String] = [:]
+    @State private var backgroundExpanded = false
     /// A store read that failed. Kept on screen until a later read succeeds:
     /// "nothing is running" and "I couldn't look" must not render alike.
     @State private var failure: String?
@@ -39,16 +40,19 @@ struct NowView: View {
     /// The spotlight card's inner padding (`p-7`).
     private static let spotlightPadding: CGFloat = 28
 
-    private var forgotten: Int { projects.filter(\.isForgotten).count }
     private var agentCount: Int { projects.reduce(0) { $0 + $1.agents.count } }
     private var serverCount: Int { projects.reduce(0) { $0 + $1.servers.count } }
     private var anyoneWorking: Bool { state.agents.contains { $0.state == .working } }
 
+    private var attention: AttentionSections { AttentionRanker().rank(projects) }
+
     /// `projects` is already sorted live-first then most-recent-first, so the
     /// first entry is the place that is moving — or, if nothing is, the place
     /// that moved last.
-    private var spotlight: LiveProject? { projects.first }
-    private var others: [LiveProject] { Array(projects.dropFirst()) }
+    private var spotlight: LiveProject? { attention.continueWork.first }
+    private var recentProjects: [LiveProject] {
+        Array(attention.continueWork.dropFirst()) + attention.recent
+    }
 
     /// True when more than one kind of agent is running, which is the only time
     /// naming it on each row tells the reader anything.
@@ -85,8 +89,12 @@ struct NowView: View {
                         empty
                     }
 
-                    if !others.isEmpty {
-                        alsoRunning
+                    if !recentProjects.isEmpty {
+                        recently
+                    }
+
+                    if !projects.isEmpty {
+                        runningInBackground
                     }
 
                     // Tabs are evidence about the work even when no agents or
@@ -141,7 +149,7 @@ struct NowView: View {
                         .tracking(1.0)
                         .foregroundStyle(Journal.inkSoft)
                 }
-                Text("What are you working on?")
+                Text("Pick up where you left off")
                     .font(.journalTitle(28))
                     .tracking(-0.4)
                     .foregroundStyle(Journal.ink)
@@ -167,18 +175,12 @@ struct NowView: View {
                 pillIcon("globe", tint: Journal.inkSoft)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(nowCount(agentCount, "agent")) · \(nowCount(serverCount, "server"))")
+                Text("\(projects.count) thing\(projects.count == 1 ? "" : "s") in the background")
                     .font(.observed(11, weight: .medium))
                     .foregroundStyle(Journal.ink)
-                if forgotten > 0 {
-                    Text("\(forgotten) left running and forgotten")
-                        .font(.caption())
-                        .foregroundStyle(Journal.amber)
-                } else {
-                    Text("nothing forgotten")
-                        .font(.caption())
-                        .foregroundStyle(Journal.inkSoft)
-                }
+                Text("\(nowCount(agentCount, "coding session")) · \(nowCount(serverCount, "local server"))")
+                    .font(.caption())
+                    .foregroundStyle(Journal.inkSoft)
             }
         }
         .padding(.horizontal, Journal.Space.l)
@@ -202,7 +204,6 @@ struct NowView: View {
     /// The place that is moving, given the room the design gives it.
     private func spotlightCard(_ project: LiveProject) -> some View {
         let canonical = FilePathCanon.canonical(project.path)
-        let isLive = project.agents.contains { $0.state.isActive }
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: Journal.Space.xl) {
@@ -211,7 +212,7 @@ struct NowView: View {
                         // "Active" only when something here is awake. An idle
                         // agent's project is the last one you touched, not the
                         // one you are working in.
-                        NowChip(text: isLive ? "Active project" : "Last active project")
+                        NowChip(text: "Continue your work")
                         if let who = whoIsHere(project) {
                             Text(who)
                                 .font(.caption())
@@ -370,18 +371,62 @@ struct NowView: View {
         }
     }
 
-    // MARK: - Also running
+    // MARK: - Recently
 
-    private var alsoRunning: some View {
+    private var recently: some View {
         VStack(alignment: .leading, spacing: Journal.Space.l) {
             NowSectionHeader(
-                symbol: "square.stack", title: "Also running",
-                trailing: nowCount(others.count, "place")
+                symbol: "clock", title: "Recently",
+                trailing: nowCount(recentProjects.count, "place")
             )
             VStack(spacing: Journal.Space.m) {
-                ForEach(others) { project in
+                ForEach(recentProjects) { project in
                     projectRow(project)
                 }
+            }
+        }
+    }
+
+    // MARK: - Running in the background
+
+    private var runningInBackground: some View {
+        VStack(alignment: .leading, spacing: Journal.Space.l) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    backgroundExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: Journal.Space.s) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 14, weight: .medium))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Running in the background")
+                            .font(.journalTitle(15))
+                            .foregroundStyle(Journal.ink)
+                        Text("\(nowCount(agentCount, "coding session")) · \(nowCount(serverCount, "local server"))")
+                            .font(.caption())
+                            .foregroundStyle(Journal.inkSoft)
+                    }
+                    Spacer()
+                    Text(backgroundExpanded ? "Hide" : "Review")
+                        .font(.observed(11, weight: .medium))
+                        .foregroundStyle(Journal.pen)
+                    Image(systemName: backgroundExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Journal.inkSoft)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .nowCard(padding: Journal.Space.l)
+
+            if backgroundExpanded {
+                VStack(spacing: Journal.Space.m) {
+                    ForEach(attention.background) { project in
+                        projectRow(project)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }
@@ -559,10 +604,12 @@ struct NowView: View {
 
     private var empty: some View {
         VStack(alignment: .leading, spacing: Journal.Space.s) {
-            Text("Nothing running.")
+            Text("Nothing recent to continue.")
                 .font(.journalTitle(19))
                 .foregroundStyle(Journal.ink)
-            Text("No coding agents and no local servers. Start one and it appears here. Press \(model.captureTrigger.displayString) anywhere to note why you're here.")
+            Text(projects.isEmpty
+                 ? "When you return to work, it will appear here. Press \(model.captureTrigger.displayString) anywhere to note why you're here."
+                 : "The things still open on your Mac are listed under Running in the background.")
                 .font(.observed(13.5))
                 .foregroundStyle(Journal.inkMid)
                 .fixedSize(horizontal: false, vertical: true)

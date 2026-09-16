@@ -11,6 +11,68 @@ import FlowTraceCore
 func runNowTests() {
     let home = "/Users/dev"
 
+    TestKit.suite("Human-first Now sections")
+
+    func attentionProject(
+        _ name: String,
+        humanDaysAgo: Double?,
+        machineMinutesAgo: Double = 1,
+        prompt: String? = nil,
+        serverPort: UInt16? = nil
+    ) -> LiveProject {
+        let agent = humanDaysAgo.map { days in
+            LiveAgent(
+                pid: Int32.random(in: 1_000...9_999), agent: .claudeCode,
+                workingDirectory: "/p/\(name)", projectRoot: "/p/\(name)",
+                repositoryName: name, lastPrompt: prompt,
+                lastActivityAt: Date().addingTimeInterval(-machineMinutesAgo * 60),
+                lastHumanActivityAt: Date().addingTimeInterval(-days * 86_400),
+                state: .working
+            )
+        }
+        let servers = serverPort.map {
+            [LiveServer(pid: 9_999, port: $0, processName: "node",
+                        workingDirectory: "/p/\(name)", projectRoot: "/p/\(name)",
+                        projectName: name)]
+        } ?? []
+        return LiveProject(path: "/p/\(name)", name: name,
+                           agents: agent.map { [$0] } ?? [], servers: servers)
+    }
+
+    TestKit.test("machine activity alone never becomes work to continue") {
+        let machineOnly = attentionProject("server", humanDaysAgo: nil, serverPort: 3000)
+        let sections = AttentionRanker(now: Date()).rank([machineOnly])
+        expect(sections.continueWork.isEmpty)
+        expect(sections.recent.isEmpty)
+        expectEqual(sections.background.count, 1)
+    }
+
+    TestKit.test("recent human attention outranks a fresher machine heartbeat") {
+        let human = attentionProject("human", humanDaysAgo: 1, machineMinutesAgo: 60,
+                                     prompt: "finish the launch brief")
+        let machine = attentionProject("machine", humanDaysAgo: 5, machineMinutesAgo: 0)
+        let sections = AttentionRanker(now: Date()).rank([machine, human])
+        expectEqual(sections.continueWork.first?.name, "human")
+    }
+
+    TestKit.test("Continue has two places and Recently has the next six without duplicates") {
+        let projects = (0..<10).map {
+            attentionProject("p\($0)", humanDaysAgo: Double($0) + 0.1)
+        }
+        let sections = AttentionRanker(now: Date()).rank(projects)
+        expectEqual(sections.continueWork.count, 2)
+        expectEqual(sections.recent.count, 6)
+        expect(Set(sections.continueWork.map(\.path)).isDisjoint(with: sections.recent.map(\.path)))
+    }
+
+    TestKit.test("work older than thirty days is background, not recent") {
+        let old = attentionProject("old", humanDaysAgo: 31)
+        let sections = AttentionRanker(now: Date()).rank([old])
+        expect(sections.continueWork.isEmpty)
+        expect(sections.recent.isEmpty)
+        expectEqual(sections.background.map(\.name), ["old"])
+    }
+
     TestKit.suite("How long is long enough")
 
     let thresholds = ActivityThresholds.default
