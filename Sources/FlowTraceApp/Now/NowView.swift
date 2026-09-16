@@ -348,8 +348,6 @@ struct NowView: View {
                     .font(.yourWords(15))
                 .foregroundStyle(Journal.ink)
                 .onTapGesture { begin(path: project.path, existing: building) }
-            } else if let brief = project.readmeBrief {
-                contextLine(label: "project brief", text: brief)
             }
 
             if let prompt = project.lastPrompt, !prompt.isEmpty {
