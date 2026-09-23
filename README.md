@@ -1,382 +1,222 @@
-# FlowTrace
+<p align="center">
+  <img src="Resources/AppIcon-1024.png" width="128" alt="FlowTrace logo">
+</p>
 
-**Remember what you were doing. Find it when you forget.**
+<h1 align="center">FlowTrace</h1>
 
-FlowTrace is a native macOS memory and retrieval tool for your work.
+<p align="center"><strong>Remember what you were doing. Find it when you forget.</strong></p>
 
-It captures useful context from the things you interact with on your computer, stores it locally, and lets you recover that context later when you no longer remember where something came from.
+<p align="center">A local-first memory and retrieval app for macOS.</p>
 
-The goal is simple:
+<p align="center">
+  <a href="https://github.com/Fuzailkazi/flowtrace/releases">Download for macOS</a>
+  · <a href="https://github.com/Fuzailkazi/flowtrace/issues">Report an issue</a>
+</p>
 
-> **You shouldn't have to remember where you saw something in order to find it again.**
+FlowTrace keeps useful context from your work — notes, screenshots, browser pages,
+terminal sessions, coding-agent sessions, repositories, and projects — so you can
+recover it later without remembering exactly where you saw it.
 
----
+Everything is stored on your Mac. FlowTrace does not require an account or a cloud
+backend.
 
-## Why FlowTrace?
+## Download and install
 
-A lot of useful information passes through our computers every day:
+### Recommended: download the app
 
-- A screenshot of a product or pricing page
+1. Open the [latest FlowTrace release](https://github.com/Fuzailkazi/flowtrace/releases).
+2. Download `FlowTrace-0.1.0-macOS.zip`.
+3. Unzip it and move `FlowTrace.app` to `/Applications`.
+4. Open FlowTrace from Applications.
 
-- An error message
+The current release is ad-hoc signed for local distribution. If macOS blocks the
+first launch, right-click `FlowTrace.app`, choose **Open**, and confirm. If macOS
+still reports that the app cannot be opened, run:
 
-- A useful AI response
-
-- A piece of code
-
-- A design
-
-- An article
-
-- A browser page
-
-- A terminal session
-
-- An idea or thought
-
-- Something you were working on earlier
-
-We often recognize that something is useful and intend to come back to it.
-
-Then we forget.
-
-We don't remember the exact application, window, URL, project, or time when we saw it.
-
-FlowTrace is designed to preserve enough context that the memory can be recovered later.
-
----
-
-## The Core Experience
-
-FlowTrace revolves around a simple loop:
-
-```text
-See something
-     ↓
-Remember it
-     ↓
-FlowTrace captures useful context
-     ↓
-Continue working
-     ↓
-Forget where / why
-     ↓
-Retrieve it
-     ↓
-Recover the context
+```bash
+xattr -dr com.apple.quarantine /Applications/FlowTrace.app
 ```
 
-The ideal outcome is:
+Then open FlowTrace again. Developer ID signing and notarization are planned for a
+future public release.
 
-**"Thank god FlowTrace remembered that."**
+### Build it yourself
 
----
+The project supports macOS 14 or later and can be built with the Swift Command Line
+Tools; Xcode is not required.
 
-## Capture
-
-FlowTrace provides a lightweight Quick Capture experience that lets you save something without leaving the application you're currently using.
-
-There are two capture intentions.
-
-### Remember this
-
-Designed for things you want to visually remember.
-
-The screenshot is the primary memory.
-
-FlowTrace can also capture useful surrounding context such as:
-
-- Application
-
-- Window
-
-- Browser page
-
-- URL
-
-- Project or repository
-
-- Relevant activity
-
-- Agent context when available
-
-You can optionally add a note.
-
-### Take a note
-
-Designed for capturing a thought or piece of information.
-
-The text is the primary memory.
-
-Useful surrounding context is captured automatically, while screenshots remain optional and are off by default.
-
-This distinction keeps capture intentional rather than turning every note into a screenshot.
-
----
-
-## Memory
-
-FlowTrace treats a saved item as a **Memory**.
-
-A memory can contain multiple types of evidence and context.
-
-For example:
-
-```text
-Memory
-├── Primary content
-│   ├── Screenshot
-│   └── Note
-│
-├── Application context
-│   ├── Application
-│   └── Window
-│
-├── Browser context
-│   ├── URL
-│   └── Page title
-│
-├── Development context
-│   ├── Repository
-│   └── Project
-│
-└── Agent context
-    ├── Agent
-    ├── Session
-    └── Working directory
+```bash
+git clone https://github.com/Fuzailkazi/flowtrace.git
+cd flowtrace
+./Scripts/bundle.sh release
+open dist/FlowTrace.app
 ```
 
-The purpose isn't to build a giant knowledge graph.
+The build creates `dist/FlowTrace.app`, `dist/flowtrace`, and
+`dist/FlowTrace-0.1.0-macOS.zip`.
 
-It is to preserve enough evidence to reconstruct **what you were looking at and what you were doing**.
+## First launch
 
----
+FlowTrace opens its workspace automatically. During onboarding, choose the data
+sources you want it to read. Access is opt-in and can be changed later in
+**Settings**.
 
-## Retrieval
+Depending on the features you enable, macOS may ask for Accessibility, Automation,
+or Screen Recording permission. FlowTrace does not read page contents, cookies,
+form fields, passwords, or private messages. Disable any source in Settings when
+you do not want it observed.
 
-Capturing something is only useful if you can find it again.
+## How to use it
 
-FlowTrace provides local retrieval through the macOS application and CLI.
+### Capture a memory
 
-You can search for memories using the information you remember.
+Press the configured Quick Capture shortcut (the default is `⌥ Space`) from any
+app. Choose one of these capture modes:
 
-For example:
+- **Remember this** — saves a screenshot with surrounding app, window, browser,
+  URL, project, and agent context when available.
+- **Take a note** — saves your thought and surrounding context; screenshots are
+  optional and off by default.
 
-```text
-"that Stripe pricing screenshot"
+### See what is happening now
 
-"the error I saw yesterday"
+The **Now** screen shows active coding sessions, local servers, repositories,
+open browser context, unfinished work, and notes on open pages. It is designed to
+answer: “What was I doing here?”
 
-"that black keyboard"
+### Find something later
 
-"the article about AI agents"
-
-"what was I working on in the terminal?"
-```
-
-The more useful context FlowTrace has captured, the less you need to remember yourself.
-
----
-
-## Product Surfaces
-
-FlowTrace currently has three primary surfaces.
-
-### macOS App
-
-The native macOS application is the primary user experience.
-
-It provides:
-
-- Quick Capture
-
-- Current activity context
-
-- Memory history
-
-- Retrieval and search
-
-- Settings
-
-- Onboarding
-
-### CLI
-
-The `flowtrace` CLI provides a power-user interface for interacting with FlowTrace from the terminal.
-
-This makes FlowTrace useful inside developer workflows and automation.
-
-### Browser Extension
-
-The browser extension acts as a context bridge between browser activity and the native FlowTrace application.
-
-It provides browser-specific information such as pages, URLs, and titles that can become part of a memory.
-
----
-
-## Architecture
-
-FlowTrace is designed as a local-first macOS application.
+Use **Memories** and search with whatever you remember:
 
 ```text
-                   ┌─────────────────────┐
-                   │      macOS App       │
-                   │                     │
-                   │  Capture / Now /     │
-                   │  History / Search    │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │    FlowTraceCore    │
-                   │                     │
-                   │ Activity / Context   │
-                   │ Capture / Retrieval │
-                   │ Privacy / Storage   │
-                   └───────┬─────┬───────┘
-                           │     │
-             ┌─────────────┘     └─────────────┐
-             ▼                                 ▼
-     ┌───────────────┐                 ┌───────────────┐
-     │ SQLite / FTS5 │                 │ Browser       │
-     │ Local Memory  │                 │ Extension     │
-     └───────────────┘                 └───────────────┘
+the Stripe pricing page
+that error from yesterday
+the portfolio screenshot
+what was I doing in the terminal?
 ```
 
-The core logic lives in `FlowTraceCore`, which is shared across the application and CLI.
+FlowTrace searches your notes and locally stored context using SQLite and FTS5.
 
----
+### Choose a theme
 
-## Local-First
+Open **Settings → Appearance** and choose **System**, **Light**, or **Dark**.
+The choice is saved across launches. FlowTrace also includes several color palettes.
 
-FlowTrace is designed around local data storage.
+### Use the CLI
 
-Memory is stored in a local SQLite database with FTS5-powered search.
+After building the project, run the CLI from the repository or copy it somewhere
+on your `PATH`:
 
-This architecture keeps the core experience:
-
-- Fast
-
-- Private
-
-- Available offline
-
-- Independent of a cloud backend
-
-Privacy-sensitive context is processed through the application's privacy and redaction layers before being persisted.
-
----
-
-## Project Structure
-
-A simplified view of the repository:
-
-```text
-FlowTrace/
-├── FlowTrace/
-│   └── macOS application
-│
-├── FlowTraceCore/
-│   └── shared application logic
-│
-├── flowtrace/
-│   └── CLI
-│
-├── BrowserExtension/
-│   └── browser context bridge
-│
-├── Tests/
-│   └── unit and integration tests
-│
-└── README.md
+```bash
+./dist/flowtrace --help
+./dist/flowtrace now
+./dist/flowtrace scan
+./dist/flowtrace list
+./dist/flowtrace brief
 ```
 
-The exact structure may evolve as the application develops.
+Use `./dist/flowtrace <command> --help` for command-specific options.
 
----
+## Privacy and storage
+
+FlowTrace is local-first:
+
+- Memories are stored in a local SQLite database.
+- Search is performed locally with SQLite FTS5.
+- Agent transcripts are read only for sources you explicitly enable.
+- Sensitive values are redacted before supported context is persisted.
+- No FlowTrace account or cloud service is required.
+- The local server, when enabled, is bound to the local machine and uses a token.
+
+The data directory is managed by the app under your macOS application support
+directory. Use **Settings → Data** to inspect or remove stored data.
+
+## Browser extension
+
+The optional extension supplies browser-specific context such as the active page
+title and URL. To load it during development:
+
+1. Open your browser's extension management page.
+2. Enable **Developer mode**.
+3. Choose **Load unpacked**.
+4. Select the repository's `Extension/` directory.
+
+The extension talks to the local FlowTrace app; it does not upload browsing data.
+
+## Troubleshooting
+
+### FlowTrace is running but I cannot see the workspace
+
+Restart the app from Applications. Current builds open the workspace automatically.
+If it is still hidden, use the FlowTrace menu-bar item or run:
+
+```bash
+open -a FlowTrace
+```
+
+### The capture shortcut does nothing
+
+Open **Settings → Permissions** and confirm Accessibility access for FlowTrace.
+Then check the shortcut in **Settings → Shortcut**. Another app may already own
+the same key combination.
+
+### Browser context is missing
+
+Enable the relevant browser source in Settings, grant Automation permission when
+macOS asks, and make sure the browser is open with a frontmost window.
+
+### I want to remove FlowTrace
+
+Quit FlowTrace, drag `FlowTrace.app` to the Trash, and remove its local data from
+**Settings → Data** if you no longer want the stored memories.
 
 ## Development
 
-FlowTrace is a native macOS project built primarily with Swift and SwiftUI.
+FlowTrace is a Swift and SwiftUI macOS application with shared logic in
+`FlowTraceCore`.
 
-The project uses:
+```bash
+# Build the app
+swift build -c debug --product FlowTraceApp
 
-- Swift
+# Run the full test suite
+./Scripts/test.sh
 
-- SwiftUI
+# Build, bundle, sign ad-hoc, and launch a release app
+./Scripts/bundle.sh release
+```
 
-- SQLite
+The project includes tests for capture, storage, search, privacy, browser context,
+agent adapters, live activity, permissions, and safe process stopping.
 
-- SQLite FTS5
+## Project structure
 
-- macOS APIs
+```text
+Sources/FlowTraceApp/   SwiftUI macOS application
+Sources/FlowTraceCore/  local capture, storage, search, and privacy logic
+Sources/flowtrace/      command-line interface
+Sources/FlowTraceTests/ test suite
+Extension/              optional browser extension
+Resources/              application icons and bundled resources
+Scripts/                build, bundle, test, and development helpers
+```
 
-- WebExtension APIs
+## Design principles
 
-### Requirements
+- Capture should be lightweight and not interrupt the user's workflow.
+- Context should be collected automatically only after the user opts in.
+- Retrieval should work from imperfect human memory.
+- Privacy should be a product feature, not an afterthought.
+- FlowTrace should stay focused on memory and retrieval, not become a generic
+  task manager or cloud knowledge base.
 
-- macOS
+## Status
 
-- Xcode
-
-- Swift toolchain
-
-### Build
-
-Open the project in Xcode and build the macOS application normally.
-
-The CLI can be built and run independently using the project's Swift tooling.
-
-### Tests
-
-Run the project's test suite through Xcode or the appropriate Swift Package Manager commands.
-
-The test suite covers core functionality including memory capture, activity tracking, retrieval, storage, and privacy-related behavior.
-
----
-
-## Design Principles
-
-FlowTrace is built around a few simple principles.
-
-### Capture should be lightweight
-
-Saving something should not interrupt the user's workflow.
-
-### Context should be automatic
-
-Users shouldn't have to manually describe where they were every time they save something.
-
-### Memory should be useful later
-
-The value of a memory comes from being able to recover it after the original context is gone.
-
-### Retrieval should reduce remembering
-
-The user should be able to search using what they remember, rather than reconstructing exactly where something happened.
-
-### Privacy should be fundamental
-
-Computer context can be extremely sensitive. Local storage and controlled data handling are therefore fundamental parts of the architecture.
-
-### Keep the product focused
-
-FlowTrace is about **memory and retrieval**.
-
-It is not intended to become a generic task manager, chat assistant, collaboration platform, or cloud knowledge-management system.
-
----
-
-## Project Status
-
-FlowTrace is an actively developed macOS application.
-
-The repository contains the native application, shared core, CLI, browser extension, local storage, activity tracking, capture, and retrieval infrastructure.
-
-The product and implementation continue to evolve as the core memory experience is refined.
-
----
+FlowTrace is actively developed. The current app includes the native macOS
+workspace, onboarding and consent controls, Quick Capture, Now, Timeline,
+Memories, local search, project and agent context, browser context, local CLI,
+optional browser extension support, light/dark themes, and release bundling.
 
 ## License
 
-See the repository's license information for details.
+See [LICENSE](LICENSE) for licensing information.

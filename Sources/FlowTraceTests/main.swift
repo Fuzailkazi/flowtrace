@@ -57,6 +57,7 @@ runContextualCaptureTests(
         .deletingLastPathComponent()  // repository root
 )
 runConsentTests(fixtures: fixtures)
+runProcessStopperTests()
 
 
 TestKit.summarize()

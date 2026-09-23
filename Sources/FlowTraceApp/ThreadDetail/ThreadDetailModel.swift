@@ -71,7 +71,8 @@ final class ThreadDetailModel {
                     changes[context.repositoryPath] = change
                 }
             }
-            await MainActor.run { [weak self] in self?.repoChanges = changes }
+            let finishedChanges = changes
+            await MainActor.run { [weak self] in self?.repoChanges = finishedChanges }
         }
     }
 

@@ -161,10 +161,11 @@ struct SessionsRail: View {
                 guard let state = probe.probe(path) else { continue }
                 states[name] = (state.dirtyFileCount, state.branch)
             }
+            let finishedStates = states
             await MainActor.run {
                 groups = groups.map { group in
                     var group = group
-                    if let (dirty, branch) = states[group.name] {
+                    if let (dirty, branch) = finishedStates[group.name] {
                         group.dirtyCount = dirty
                         group.branch = branch
                     }

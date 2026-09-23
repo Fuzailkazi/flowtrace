@@ -25,6 +25,7 @@ struct NowView: View {
     @State private var browsers: [LiveBrowser] = []
     @State private var tabNotes: [String: String] = [:]
     @State private var backgroundExpanded = false
+    @State private var stopCandidate: LiveServer?
     /// A store read that failed. Kept on screen until a later read succeeds:
     /// "nothing is running" and "I couldn't look" must not render alike.
     @State private var failure: String?
@@ -135,6 +136,37 @@ struct NowView: View {
         }
         .onReceive(tick) { _ in Task { await refresh() } }
         .onReceive(browserTick) { _ in Task { await refreshBrowsers() } }
+        .alert(
+            "Stop this local server?",
+            isPresented: Binding(
+                get: { stopCandidate != nil },
+                set: { if !$0 { stopCandidate = nil } }
+            )
+        ) {
+            Button("Stop", role: .destructive) {
+                guard let server = stopCandidate else { return }
+                stopCandidate = nil
+                Task {
+                    let outcome = await ProcessStopper().stop(server: server)
+                    switch outcome {
+                    case .stopped:
+                        model.toast = Toast(message: "Stopped the server on :\(server.port).")
+                    case .identityChanged:
+                        model.toast = Toast(message: "That process changed before it could be stopped.", isError: true)
+                    case .unavailable:
+                        model.toast = Toast(message: "That server is no longer running.")
+                    case .failed(let message):
+                        model.toast = Toast(message: message, isError: true)
+                    }
+                    await refresh()
+                }
+            }
+            Button("Keep running", role: .cancel) {}
+        } message: {
+            if let server = stopCandidate {
+                Text("FlowTrace will send a graceful stop to \(server.processName) (pid \(server.pid)) only if it is still the same process it found.")
+            }
+        }
     }
 
     // MARK: - Header
@@ -509,19 +541,40 @@ struct NowView: View {
     private func portChips(_ project: LiveProject) -> some View {
         HStack(spacing: Journal.Space.xs) {
             ForEach(project.servers) { server in
-                Button {
-                    if let url = URL(string: server.address) {
-                        NSWorkspace.shared.open(url)
+                HStack(spacing: 2) {
+                    Button {
+                        if let url = URL(string: server.address) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Text(":\(String(server.port))")
+                            .font(.mono(11))
+                            .foregroundStyle(Journal.pen)
+                            .padding(.leading, 6).padding(.vertical, 1.5)
                     }
-                } label: {
-                    Text(":\(String(server.port))")
-                        .font(.mono(11))
-                        .foregroundStyle(Journal.pen)
-                        .padding(.horizontal, 6).padding(.vertical, 1.5)
-                        .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
+                    .buttonStyle(.plain)
+                    .help("Open \(server.address)")
+
+                    Menu {
+                        Button("Open in browser") {
+                            if let url = URL(string: server.address) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        Divider()
+                        Button("Stop server…", role: .destructive) {
+                            stopCandidate = server
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Journal.pen)
+                            .padding(.trailing, 5)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
-                .buttonStyle(.plain)
-                .help("Open \(server.address)")
+                .background(Journal.penSoft, in: RoundedRectangle(cornerRadius: 4))
             }
         }
     }
@@ -533,6 +586,14 @@ struct NowView: View {
         Button("Copy path") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(project.path, forType: .string)
+        }
+        if !project.servers.isEmpty {
+            Divider()
+            ForEach(project.servers) { server in
+                Button("Stop server on :\(server.port)", role: .destructive) {
+                    stopCandidate = server
+                }
+            }
         }
         Divider()
         if notes[FilePathCanon.canonical(project.path)] != nil {
@@ -749,7 +810,7 @@ struct NowView: View {
             failure = nil
         case .failure(let error):
             // Without this the reasons you wrote against open pages vanish from
-            // the grid and from Connected thoughts, looking like you never
+            // the grid and from Notes on open pages, looking like you never
             // wrote them.
             failure = error.localizedDescription
         }

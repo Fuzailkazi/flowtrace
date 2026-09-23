@@ -22,6 +22,7 @@ struct FlowTraceApp: App {
     }
 
     @State private var launch: Launch
+    @AppStorage("flowtrace.appearance") private var appearance = "system"
 
     init() {
         do {
@@ -55,6 +56,7 @@ struct FlowTraceApp: App {
                 }
             }
             .frame(minWidth: 900, minHeight: 560)
+            .preferredColorScheme(appearance.colorScheme)
         }
         .defaultSize(width: 1120, height: 720)
         // The standard titlebar is a grey band that doesn't match warm paper,
@@ -63,23 +65,39 @@ struct FlowTraceApp: App {
         .commands { FlowTraceCommands(model: launch.model) }
 
         MenuBarExtra {
-            if let model = launch.model {
-                MenuBarContent(model: model)
-            } else {
-                Button("Quit FlowTrace") { NSApplication.shared.terminate(nil) }
+            Group {
+                if let model = launch.model {
+                    MenuBarContent(model: model)
+                } else {
+                    Button("Quit FlowTrace") { NSApplication.shared.terminate(nil) }
+                }
             }
+            .preferredColorScheme(appearance.colorScheme)
         } label: {
             // The label lives for as long as the app does, which makes it the
             // one place that can hand `openWindow` to the delegate. Everything
             // else — the popover, the workspace itself — comes and goes.
-            MenuBarLabel()
+            MenuBarLabel(model: launch.model)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
-            if let model = launch.model {
-                SettingsView(model: model).frame(width: 560, height: 520)
+            Group {
+                if let model = launch.model {
+                    SettingsView(model: model).frame(width: 560, height: 520)
+                }
             }
+            .preferredColorScheme(appearance.colorScheme)
+        }
+    }
+}
+
+private extension String {
+    var colorScheme: ColorScheme? {
+        switch self {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
         }
     }
 }
@@ -87,17 +105,49 @@ struct FlowTraceApp: App {
 /// The menu-bar item's face, and the app's only permanently live view.
 private struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
+    let model: AppModel?
+    @State private var statusText: String?
+
+    private let tick = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        Image(nsImage: BrandMark.menuBarImage())
+        HStack(spacing: 4) {
+            Image(nsImage: BrandMark.menuBarImage(pointSize: statusText == nil ? 18 : 15))
+            if let statusText {
+                Text(statusText)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+        }
             .task {
                 AppLifecycle.shared?.openWindowAction = {
                     openWindow(id: FlowTraceApp.mainWindowID)
                 }
+                await refreshStatus()
             }
+            .onReceive(tick) { _ in Task { await refreshStatus() } }
+            .onChange(of: model?.consent) { _, _ in Task { await refreshStatus() } }
+    }
+
+    private func refreshStatus() async {
+        guard let model, model.mayObserve else {
+            statusText = nil
+            return
+        }
+        let sources = model.readableSources
+        let store = model.store
+        let text = await Task.detached(priority: .utility) {
+            let live = LiveStateReader().read(transcripts: sources)
+            let notes = (try? store.allProjectNotes()) ?? []
+            let ignored = (try? store.ignoredPaths()) ?? []
+            let projects = live.projects(notes: Dictionary(
+                uniqueKeysWithValues: notes.map { ($0.repositoryPath, $0) }
+            ))
+            .filter { !ignored.contains($0.path) }
+            return LiveCensus(projects: projects).menuBarStatusText
+        }.value
+        statusText = text
     }
 }
-
 /// Shown instead of the main window when the database can't be opened, with the
 /// one thing the user can actually act on: where the file is.
 struct DatabaseUnavailableView: View {

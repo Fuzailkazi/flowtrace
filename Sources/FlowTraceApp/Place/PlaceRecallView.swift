@@ -370,7 +370,12 @@ struct PlaceRecallView: View {
         var note = recall.note ?? ProjectNote(repositoryPath: path, repositoryName: recall.name)
         note.building = building.trimmingCharacters(in: .whitespacesAndNewlines)
         note.nextStep = nextStep.trimmingCharacters(in: .whitespacesAndNewlines)
-        try? model.store.saveProjectNote(note)
+        do {
+            try model.store.saveProjectNote(note)
+        } catch {
+            model.toast = Toast(message: "Couldn't save that note. Your words are still here.", isError: true)
+            return
+        }
         editing = false
         load()
     }

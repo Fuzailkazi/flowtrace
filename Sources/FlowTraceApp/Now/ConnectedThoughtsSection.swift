@@ -1,12 +1,11 @@
 import SwiftUI
 import FlowTraceCore
 
-/// The reasons you have written against pages that are open right now.
+/// Notes you have written against pages that are open right now.
 ///
-/// The design called these "connected thoughts"; here they are exactly the
-/// notes you typed under a tab, gathered in one place so your own words are
-/// readable without hunting through the browser grid. Clicking one edits it
-/// through the same path that wrote it.
+/// These are the notes you typed under a tab, gathered in one place so your
+/// own words are readable without hunting through the browser grid. Clicking
+/// one edits it through the same path that wrote it.
 struct ConnectedThoughtsSection: View {
     /// Noted tabs only, one per address.
     let tabs: [CapturedTab]
@@ -20,7 +19,7 @@ struct ConnectedThoughtsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Journal.Space.l) {
             NowSectionHeader(
-                symbol: "text.bubble", title: "Connected thoughts",
+                symbol: "text.bubble", title: "Notes on open pages",
                 trailing: nowCount(tabs.count, "note")
             )
 

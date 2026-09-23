@@ -75,3 +75,10 @@ fi
 
 echo "✓ $APP"
 echo "✓ $DIST/flowtrace"
+
+if [ "$CONFIG" = "release" ]; then
+    ARCHIVE="$DIST/FlowTrace-$VERSION-macOS.zip"
+    rm -f "$ARCHIVE"
+    ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
+    echo "✓ $ARCHIVE"
+fi

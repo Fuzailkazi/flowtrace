@@ -63,6 +63,23 @@ public struct LiveCensus: Sendable {
         return projects.first { FilePathCanon.canonical($0.path) == wanted }
     }
 
+    public var forgottenProjects: [LiveProject] {
+        projects.filter(\.isForgotten)
+    }
+
+    public var forgottenWorkCount: Int {
+        forgottenProjects.count
+    }
+
+    public var firstForgottenProject: LiveProject? {
+        forgottenProjects.first
+    }
+
+    public var menuBarStatusText: String? {
+        guard forgottenWorkCount > 0 else { return nil }
+        return "\(forgottenWorkCount) forgotten"
+    }
+
     /// "a moment ago", "18 minutes ago" — how the screen says how old this is.
     public var takenLabel: String? {
         guard hasBeenTaken else { return nil }

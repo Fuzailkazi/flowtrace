@@ -23,7 +23,8 @@ struct MenuBarContent: View {
     @State private var serverCount = 0
     @State private var loadingLive = true
 
-    private var forgotten: [LiveProject] { projects.filter(\.isForgotten) }
+    private var census: LiveCensus { LiveCensus(projects: projects) }
+    private var forgotten: [LiveProject] { census.forgottenProjects }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Journal.Space.m) {
@@ -57,6 +58,33 @@ struct MenuBarContent: View {
             }
 
             liveState
+
+            if let firstForgotten = census.firstForgottenProject {
+                card {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("FORGOTTEN WORK")
+                            .font(.caption(10)).tracking(1.0)
+                            .foregroundStyle(Journal.amber)
+                        Text(firstForgotten.name)
+                            .font(.observed(13, weight: .semibold))
+                            .foregroundStyle(Journal.ink)
+                            .lineLimit(1)
+                        Text(firstForgotten.statusLabel)
+                            .font(.observed(11))
+                            .foregroundStyle(Journal.inkMid)
+                            .lineLimit(2)
+                        Button {
+                            openPlace(firstForgotten)
+                        } label: {
+                            Label("What was I doing here?", systemImage: "arrow.uturn.backward")
+                        }
+                        .buttonStyle(.plain)
+                        .font(.observed(11, weight: .medium))
+                        .foregroundStyle(Journal.pen)
+                        .padding(.top, 2)
+                    }
+                }
+            }
 
             if !model.proposals.isEmpty {
                 card {
@@ -163,8 +191,8 @@ struct MenuBarContent: View {
                         .font(.observed(12, weight: .semibold))
                         .foregroundStyle(Journal.ink)
                     Spacer()
-                    if !forgotten.isEmpty {
-                        Text("\(forgotten.count) forgotten")
+                    if let text = census.menuBarStatusText {
+                        Text(text)
                             .font(.caption(10))
                             .foregroundStyle(Journal.amber)
                             .padding(.horizontal, 6).padding(.vertical, 2)
@@ -176,20 +204,27 @@ struct MenuBarContent: View {
                 // first, then whatever moved most recently.
                 let shown = (forgotten + projects.filter { !$0.isForgotten }).prefix(3)
                 ForEach(Array(shown)) { project in
-                    HStack(spacing: Journal.Space.s) {
-                        Circle()
-                            .fill(project.isForgotten ? Journal.ruleFirm : Journal.live)
-                            .frame(width: 6, height: 6)
-                        Text(project.name)
-                            .font(.observed(11.5))
-                            .foregroundStyle(Journal.ink)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(project.statusLabel)
-                            .font(.caption(10))
-                            .foregroundStyle(Journal.inkSoft)
-                            .lineLimit(1)
+                    Button {
+                        openPlace(project)
+                    } label: {
+                        HStack(spacing: Journal.Space.s) {
+                            Circle()
+                                .fill(project.isForgotten ? Journal.amber : Journal.live)
+                                .frame(width: 6, height: 6)
+                            Text(project.name)
+                                .font(.observed(11.5))
+                                .foregroundStyle(Journal.ink)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Text(project.statusLabel)
+                                .font(.caption(10))
+                                .foregroundStyle(Journal.inkSoft)
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .help("Open what FlowTrace remembers about \(project.name)")
                 }
             }
         }
@@ -250,5 +285,11 @@ struct MenuBarContent: View {
         // skipped. One call now, shared with the Dock tile and reopen, so there
         // is a single story about what opening FlowTrace does.
         AppLifecycle.shared?.openWorkspace()
+    }
+
+    private func openPlace(_ project: LiveProject) {
+        model.recordCensus(projects)
+        model.route = .place(project.path)
+        activate()
     }
 }

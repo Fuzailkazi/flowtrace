@@ -64,10 +64,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             Self.shared = self
             guard let model = Self.model else { return }
-            // FlowTrace starts as what it is: a key and a menu-bar item. The
-            // main window is a place to go, not the thing that opens — except
-            // on the very first launch, where the first-run screen is the only
-            // thing there is to do.
+            // Open the workspace on launch so the app is immediately reachable.
+            // It remains a menu-bar resident after the window is closed.
             if Self.wantsMainWindowAtLaunch(model) {
                 // First run opens on the main window, so it is a workspace
                 // session like any other and gets the same identity.
@@ -93,15 +91,12 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The two reasons to open on the main window rather than the menu bar: a
-    /// first run, where the first-run screen is the only thing there is to do,
-    /// and `FLOWTRACE_OPEN_ROUTE`, the development switch that launches
-    /// straight onto a screen so it can be screenshotted.
+    /// FlowTrace should always be immediately usable after launch. The
+    /// development route/thread switches are retained for targeted launches.
     @MainActor
     private static func wantsMainWindowAtLaunch(_ model: AppModel) -> Bool {
-        if !model.consent.hasCompletedOnboarding { return true }
-        return ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_ROUTE"] != nil
-            || ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_THREAD"] != nil
+        _ = model
+        return true
     }
 
     /// Closes the main window without touching the panel, the menu-bar popover
@@ -243,7 +238,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
 
     // MARK: - Capture trigger
 
-    /// ⌥Space opens a small panel over whatever you are doing.
+    /// The configured capture trigger opens a small panel over whatever you are doing.
     ///
     /// Registered at launch, before and regardless of first run: the shortcut is
     /// the product's one affordance, and a key that only starts working after a

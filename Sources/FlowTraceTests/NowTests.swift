@@ -281,6 +281,18 @@ func runNowTests() {
         expectEqual(project.statusLabel, "server only")
         expect(!project.isForgotten, "a port held open is not a forgotten session")
     }
+
+    TestKit.test("a census exposes forgotten work for persistent surfaces") {
+        let state = LiveState(agents: [
+            agent("old", root: "/p/old", state: .forgotten, minutesAgo: 3_000),
+            agent("busy", root: "/p/busy", state: .working),
+        ])
+        let census = LiveCensus(projects: state.projects())
+
+        expectEqual(census.forgottenWorkCount, 1)
+        expectEqual(census.firstForgottenProject?.name, "old")
+        expectEqual(census.menuBarStatusText, "1 forgotten")
+    }
 }
 
 /// Associating a running process with the work it is doing.

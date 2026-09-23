@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var browsers: [BrowserAccess.BrowserState] = []
     @State private var holdings: Store.Holdings?
+    @AppStorage("flowtrace.appearance") private var appearance = "system"
     /// Set when the counts below could not be read. Shown, because this section
     /// is a privacy promise being made checkable and a silent zero is the one
     /// answer that would make it a false one.
@@ -177,6 +178,13 @@ struct SettingsView: View {
             SectionHeader(title: "Appearance", subtitle: "follows your system light or dark setting")
             Card {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Picker("Mode", selection: $appearance) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+
                     ForEach(Palette.all) { palette in
                         Button {
                             model.palette = palette

@@ -282,7 +282,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     Text("The scan didn't finish").font(.system(size: 17, weight: .semibold))
                     Text(message).font(.system(size: 12)).foregroundStyle(.red)
-                    Text("You can still use FlowTrace and create threads by hand.")
+                    Text("You can still use FlowTrace and write notes by hand.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .padding(Theme.Space.xxl)
@@ -292,7 +292,7 @@ struct OnboardingView: View {
                     Text("Nothing unfinished").font(.system(size: 17, weight: .semibold))
                     Text("FlowTrace read \(summary.sessions) sessions across "
                          + "\(summary.repositories) repositories and everything is committed "
-                         + "and pushed. Create a thread when you start something you'll want "
+                         + "and pushed. Write a note when you start something you'll want "
                          + "to come back to.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -371,9 +371,8 @@ struct OnboardingView: View {
     }
 
     private func finish() {
-        // Nothing to settle about the shortcut here: ⌥Space is registered at
-        // launch whether or not this screen is ever reached, and a recorded
-        // change is saved by the step that recorded it.
+        // The trigger is registered at launch, whether or not this screen is
+        // ever reached. Any recorded change is saved by the shortcut step.
         model.consent.hasCompletedOnboarding = true
         model.consent.save()
         // The master gate has just opened. Start what the user agreed to now
