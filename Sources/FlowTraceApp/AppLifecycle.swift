@@ -143,7 +143,15 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     /// already there rather than building a second window.
     @MainActor
     func openWorkspace() {
-        if !raiseMainWindow() { openWindowAction?() }
+        if raiseMainWindow() {
+            enterWorkspace()
+            return
+        }
+        guard let openWindowAction else {
+            Diagnostics.log("workspace open requested before SwiftUI action was ready")
+            return
+        }
+        openWindowAction()
         revealMainWindow()
     }
 

@@ -284,6 +284,7 @@ final class AppModel {
     var palette: Palette {
         get { Palette.current }
         set {
+            guard newValue.id != Palette.current.id else { return }
             newValue.select()
             paletteRevision += 1
         }
