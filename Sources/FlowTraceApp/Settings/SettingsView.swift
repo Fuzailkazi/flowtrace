@@ -40,7 +40,17 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .task {
             reload()
-            browsers = model.mayObserve ? BrowserAccess.survey() : []
+            guard model.mayObserve else {
+                browsers = []
+                return
+            }
+            // macOS's Automation permission check can wait on the system
+            // permission service. Keep that synchronous call off SwiftUI's
+            // main actor so opening Settings (and changing appearance) stays
+            // responsive while browser access is surveyed.
+            browsers = await Task.detached(priority: .utility) {
+                BrowserAccess.survey()
+            }.value
         }
         .onReceive(permissionTick) { _ in
             let granted = AccessibilityPermission.isGranted
