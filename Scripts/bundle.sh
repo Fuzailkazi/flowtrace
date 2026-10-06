@@ -23,6 +23,18 @@ if ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
     echo "FLOWTRACE_BUILD_NUMBER must be a positive integer." >&2
     exit 2
 fi
+if [ "$CONFIG" = "debug" ]; then
+    BUNDLE_ID="${FLOWTRACE_DEV_BUNDLE_ID:-$BUNDLE_ID}"
+    if ! [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]]; then
+        echo "FLOWTRACE_DEV_BUNDLE_ID must be a dotted bundle identifier." >&2
+        exit 2
+    fi
+    if [ -n "${FLOWTRACE_DEV_SUPPORT_DIR:-}" ] &&
+       { [ "${FLOWTRACE_DEV_SUPPORT_DIR:0:1}" != "/" ] || [ "$FLOWTRACE_DEV_SUPPORT_DIR" = "/" ]; }; then
+        echo "FLOWTRACE_DEV_SUPPORT_DIR must be an absolute directory other than /." >&2
+        exit 2
+    fi
+fi
 
 # Set FLOWTRACE_SIGN_IDENTITY to a Developer ID for a build eligible for
 # notarization. Signing alone is not the finished public distribution step.
@@ -75,6 +87,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+if [ "$CONFIG" = "debug" ] && [ -n "${FLOWTRACE_DEV_SUPPORT_DIR:-}" ]; then
+    plutil -insert FlowTraceDevSupportDirectory -string "$FLOWTRACE_DEV_SUPPORT_DIR" \
+        "$APP/Contents/Info.plist"
+fi
 
 cat > "$APP/Contents/PkgInfo" <<< "APPL????"
 

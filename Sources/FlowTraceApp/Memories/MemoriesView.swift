@@ -65,7 +65,7 @@ struct MemoriesView: View {
                         .foregroundStyle(Journal.inkMid)
                 }
                 filterChips
-                stream
+                if !visible.isEmpty || visibleProjects.isEmpty { stream }
                 if !visibleProjects.isEmpty { building }
                 footer
             }
@@ -119,11 +119,12 @@ struct MemoriesView: View {
     }
 
     private var memoryCountLabel: String {
+        let count = visible.count + visibleProjects.count
         if matches != nil {
-            return "\(searchedMemories.count) match\(searchedMemories.count == 1 ? "" : "es")"
+            return "\(count) match\(count == 1 ? "" : "es")"
         }
-        if memories.count == 400 { return "400 recent memories" }
-        return "\(memories.count) memor\(memories.count == 1 ? "y" : "ies")"
+        if memories.count == 400 && filter == .all { return "\(count) recent notes" }
+        return "\(count) note\(count == 1 ? "" : "s")"
     }
 
     // MARK: - Today
@@ -161,6 +162,7 @@ struct MemoriesView: View {
     private var notesToday: Int {
         let calendar = Calendar.current
         return memories.filter { calendar.isDateInToday($0.startedAt) }.count
+            + projects.filter { calendar.isDateInToday($0.updatedAt) }.count
     }
 
     private func todayTile(
@@ -620,9 +622,28 @@ struct MemoriesView: View {
     /// The project notes the index matched, or all of them when nothing is
     /// being searched. A place whose note mentions the query is itself a result.
     private var visibleProjects: [ProjectNote] {
-        guard matches != nil else { return projects }
-        return matchedPlaces.compactMap { path in
-            projects.first { $0.repositoryPath == path }
+        let candidates: [ProjectNote]
+        if matches == nil {
+            candidates = projects
+        } else {
+            candidates = matchedPlaces.compactMap { path in
+                projects.first { $0.repositoryPath == path }
+            }
+        }
+        let calendar = Calendar.current
+        let now = Date()
+        return candidates.filter { note in
+            switch filter {
+            case .all, .withPlace: true
+            case .today: calendar.isDateInToday(note.updatedAt)
+            case .yesterday:
+                calendar.date(byAdding: .day, value: -1, to: now)
+                    .map { calendar.isDate(note.updatedAt, inSameDayAs: $0) } ?? false
+            case .week:
+                calendar.date(byAdding: .day, value: -7, to: calendar.startOfDay(for: now))
+                    .map { note.updatedAt >= $0 } ?? true
+            case .app: false
+            }
         }
     }
 
@@ -644,50 +665,54 @@ struct MemoriesView: View {
     }
 
     private func projectCard(_ note: ProjectNote) -> some View {
-        VStack(alignment: .leading, spacing: Journal.Space.s) {
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 11, weight: .semibold))
+        Button { model.route = .place(note.repositoryPath) } label: {
+            VStack(alignment: .leading, spacing: Journal.Space.s) {
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Journal.inkSoft)
+                        Text(note.repositoryName)
+                            .font(.observed(14, weight: .semibold))
+                            .foregroundStyle(Journal.ink)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: Journal.Space.s)
+                    Text(MemoryFormat.dayCaption(note.updatedAt))
+                        .font(.caption())
                         .foregroundStyle(Journal.inkSoft)
-                    Text(note.repositoryName)
-                        .font(.observed(14, weight: .semibold))
-                        .foregroundStyle(Journal.ink)
                         .lineLimit(1)
                 }
-                Spacer(minLength: Journal.Space.s)
-                Text(MemoryFormat.dayCaption(note.updatedAt))
-                    .font(.caption())
-                    .foregroundStyle(Journal.inkSoft)
-                    .lineLimit(1)
-            }
-            if !note.building.isEmpty {
-                Text("“\(note.building)”")
-                    .font(.yourWords(14))
-                    .foregroundStyle(Journal.ink)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !note.nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Text("Next")
-                        .font(.caption())
-                        .tracking(1.0)
-                        .foregroundStyle(Journal.inkSoft)
-                        .padding(.top, 2)
-                    Text(note.nextStep)
-                        .font(.observed(13))
-                        .foregroundStyle(Journal.inkMid)
-                        .lineLimit(3)
+                if !note.building.isEmpty {
+                    Text("“\(note.building)”")
+                        .font(.yourWords(14))
+                        .foregroundStyle(Journal.ink)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if !note.nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("Next")
+                            .font(.caption())
+                            .tracking(1.0)
+                            .foregroundStyle(Journal.inkSoft)
+                            .padding(.top, 2)
+                        Text(note.nextStep)
+                            .font(.observed(13))
+                            .foregroundStyle(Journal.inkMid)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if note.isPaused {
+                    WashChip("Paused", mono: true)
+                }
             }
-            if note.isPaused {
-                WashChip("Paused", mono: true)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .memoryCard()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .memoryCard()
+        .buttonStyle(.plain)
+        .help("Open what FlowTrace remembers about \(note.repositoryName)")
         .contextMenu {
             Button("Open in Finder") {
                 NSWorkspace.shared.open(URL(fileURLWithPath: note.repositoryPath))

@@ -4,6 +4,8 @@
 
 **Current internal candidate:** `/tmp/flowtrace-beta-frozen-b1832ed/FlowTrace-0.1.1-build3-macOS.zip` (SHA-256 `1ef9321e8f5913b2c2ba3fc2fc47554f968901774429a24f229bd96581af7ca1`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `3`, built from an export of commit `b1832edbbb27350c3e04b6122a38dc230e5f2c2b` on `codex/flowtrace-beta-prep`. The clean exported source built the app and CLI; the extracted ZIP passed plist and signature-integrity checks. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
 
+The later isolated UI walkthrough found and fixed a Memories result-count and project-card navigation problem. Build 3 predates that fix; rebuild a new numbered archive from a new code commit before participant sessions.
+
 Previous ad-hoc candidates were built from a dirty working tree. Build 3 supersedes them for internal review. The commit excludes a pre-existing clickable-title edit still present in the working tree; that separate edit is not in this archive.
 
 ## Before inviting participants (T-2w to T-1d)
