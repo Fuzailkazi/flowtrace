@@ -82,7 +82,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticTermination</key><false/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>After you connect a browser, FlowTrace reads tab titles and URLs in its front window to show what you were reading. It never reads page contents, cookies or form data.</string>
+    <string>FlowTrace reads the active browser tab's title and URL when you use Quick Capture, or while automatic recording is enabled. It never reads page contents, cookies or form data.</string>
     <key>NSAppleScriptEnabled</key><false/>
 </dict>
 </plist>
