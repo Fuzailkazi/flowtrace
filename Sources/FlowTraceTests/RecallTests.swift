@@ -210,6 +210,43 @@ func runRecallTests() {
         expectEqual(project.agents.count, 2, "both are still there to be seen")
     }
 
+    TestKit.test("the last human prompt wins over newer agent output") {
+        let recentHuman = Date().addingTimeInterval(-3_600)
+        let olderHuman = Date().addingTimeInterval(-7_200)
+        let project = LiveProject(
+            path: scratch.path, name: "acme",
+            agents: [
+                LiveAgent(
+                    pid: 1, agent: .claudeCode, workingDirectory: scratch.path,
+                    projectRoot: scratch.path, repositoryName: "acme",
+                    lastPrompt: "older human request",
+                    lastActivityAt: Date().addingTimeInterval(-60),
+                    lastHumanActivityAt: olderHuman, state: .working
+                ),
+                LiveAgent(
+                    pid: 2, agent: .codex, workingDirectory: scratch.path,
+                    projectRoot: scratch.path, repositoryName: "acme",
+                    lastPrompt: "newer human request",
+                    lastActivityAt: Date().addingTimeInterval(-1_800),
+                    lastHumanActivityAt: recentHuman, state: .waiting
+                ),
+            ], servers: []
+        )
+        expectEqual(project.lastPrompt, "newer human request")
+    }
+
+    TestKit.test("an unread agent cannot supply a recovery prompt") {
+        let project = LiveProject(
+            path: scratch.path, name: "acme",
+            agents: [LiveAgent(
+                pid: 1, agent: .claudeCode, workingDirectory: scratch.path,
+                projectRoot: scratch.path, repositoryName: "acme",
+                lastPrompt: "private prompt", state: .waiting, transcriptHidden: true
+            )], servers: []
+        )
+        expectNil(project.lastPrompt)
+    }
+
     TestKit.test("an unread agent contributes no story at all") {
         let hidden = LiveProject(
             path: scratch.path, name: "acme",
