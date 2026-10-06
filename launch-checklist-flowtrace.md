@@ -2,9 +2,9 @@
 
 **Launch type:** private, observed beta for 8–10 Mac developers using several coding-agent sessions across at least two repositories. **Date:** TBD after the product owner chooses the first problem to prove. **Public release:** separate gate.
 
-**Current internal candidate:** `/tmp/flowtrace-beta-frozen-b1832ed/FlowTrace-0.1.1-build3-macOS.zip` (SHA-256 `1ef9321e8f5913b2c2ba3fc2fc47554f968901774429a24f229bd96581af7ca1`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `3`, built from an export of commit `b1832edbbb27350c3e04b6122a38dc230e5f2c2b` on `codex/flowtrace-beta-prep`. The clean exported source built the app and CLI; the extracted ZIP passed plist and signature-integrity checks. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
+**Current internal candidate:** `/tmp/flowtrace-beta-frozen-a0156b9/FlowTrace-0.1.1-build4-macOS.zip` (SHA-256 `1ebfe92e0bcb439dca97ea31f4b6b7c09f629a5517d740187f290bcaac567ea1`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `4`, built from an export of commit `a0156b9` on `codex/flowtrace-beta-prep`. The clean exported source built the app and CLI and passed 369 tests. The archive passed plist and signature-integrity checks, has the production bundle ID, and contains no debug support-directory key. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
 
-The later isolated UI walkthrough found and fixed a Memories result-count and project-card navigation problem. Build 3 predates that fix; rebuild a new numbered archive from a new code commit before participant sessions.
+Build 4 includes the Memories result-count and project-card navigation fix found in the isolated UI walkthrough. Build 3 remains at `/tmp/flowtrace-beta-frozen-b1832ed/FlowTrace-0.1.1-build3-macOS.zip` as the preceding internal candidate.
 
 Previous ad-hoc candidates were built from a dirty working tree. Build 3 supersedes them for internal review. The commit excludes a pre-existing clickable-title edit still present in the working tree; that separate edit is not in this archive.
 
