@@ -35,6 +35,11 @@ public struct CodexAdapter: AgentAdapter {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         let titles = loadTitles()
         let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: sessionsRoot.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw SessionDirectoryError(path: sessionsRoot.path)
+        }
         guard let walker = fm.enumerator(
             at: sessionsRoot, includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
@@ -64,6 +69,11 @@ public struct CodexAdapter: AgentAdapter {
     public func discoverSessionsWithDiagnostics(cache: SessionCache? = nil) throws -> AgentDiscovery {
         let titles = loadTitles()
         let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: sessionsRoot.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            throw SessionDirectoryError(path: sessionsRoot.path)
+        }
         guard let walker = fm.enumerator(
             at: sessionsRoot,
             includingPropertiesForKeys: nil,

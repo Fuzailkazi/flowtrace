@@ -226,8 +226,14 @@ struct PlaceRecallView: View {
     /// as "there was nothing here", which is a different and often wrong claim.
     private func whatIsMissing(_ recall: PlaceRecall) -> some View {
         Group {
-            if !recall.gaps.isEmpty {
+            if !recall.gaps.isEmpty || !recall.sourceFailures.isEmpty {
                 VStack(alignment: .leading, spacing: Journal.Space.s) {
+                    ForEach(recall.sourceFailures, id: \.self) { failure in
+                        Label("Could not read \(failure)", systemImage: "exclamationmark.triangle")
+                            .font(.caption())
+                            .foregroundStyle(Journal.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     ForEach(recall.gaps, id: \.self) { gap in
                         HStack(alignment: .top, spacing: Journal.Space.s) {
                             Image(systemName: "questionmark.circle")

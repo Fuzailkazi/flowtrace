@@ -152,6 +152,72 @@ func runRecallTests() {
                "never claims nothing was found when nothing was looked at")
     }
 
+    TestKit.test("an enabled source read error is not presented as empty history") {
+        let repo = try TempRepo(name: "unreadable-agent-source")
+        repo.write("main.swift", "print(1)")
+        repo.commit("start", daysAgo: 5)
+        let source = repo.root.appendingPathComponent("source-is-a-file")
+        try "not a directory".write(to: source, atomically: true, encoding: .utf8)
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let reader = PlaceRecallBuilder(briefs: BriefBuilder(
+            claude: ClaudeCodeAdapter(root: source)
+        ))
+        let recall = reader.build(
+            path: repo.path, name: "unreadable-agent-source",
+            sources: .claudeCode, config: config
+        )
+        expect(recall.git != nil, "the source failure must not hide Git context")
+        expectEqual(recall.sourceFailures.count, 1)
+        expectContains(recall.sourceFailures.first, "Claude Code")
+        expect(!recall.gaps.contains(.noSessionsFound), "no session is not a proven finding")
+        expectContains(recall.intentAbsence, "could not read")
+    }
+
+    TestKit.test("an unreadable OpenCode database is not presented as empty history") {
+        let repo = try TempRepo(name: "unreadable-opencode-source")
+        repo.write("main.swift", "print(1)")
+        repo.commit("start", daysAgo: 5)
+        let database = repo.root.appendingPathComponent("not-a-database.db")
+        try "not SQLite".write(to: database, atomically: true, encoding: .utf8)
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let reader = PlaceRecallBuilder(briefs: BriefBuilder(openCodeDatabase: database))
+        let recall = reader.build(
+            path: repo.path, name: "unreadable-opencode-source",
+            sources: .openCode, config: config
+        )
+        expectEqual(recall.sourceFailures.count, 1)
+        expectContains(recall.sourceFailures.first, "OpenCode")
+        expect(!recall.gaps.contains(.noSessionsFound))
+    }
+
+    TestKit.test("an unreadable Codex sessions directory is not presented as empty history") {
+        let repo = try TempRepo(name: "unreadable-codex-source")
+        repo.write("main.swift", "print(1)")
+        repo.commit("start", daysAgo: 5)
+        let source = repo.root.appendingPathComponent("codex-root")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try "not a directory".write(
+            to: source.appendingPathComponent("sessions"), atomically: true, encoding: .utf8
+        )
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let reader = PlaceRecallBuilder(briefs: BriefBuilder(
+            codex: CodexAdapter(root: source)
+        ))
+        let recall = reader.build(
+            path: repo.path, name: "unreadable-codex-source",
+            sources: .codex, config: config
+        )
+        expectEqual(recall.sourceFailures.count, 1)
+        expectContains(recall.sourceFailures.first, "Codex")
+        expect(!recall.gaps.contains(.noSessionsFound))
+    }
+
     TestKit.test("a note you wrote is still yours to read without any source switched on") {
         let recall = builder.build(
             path: scratch.path, name: "acme", sources: .none, note: note(building: "the billing rewrite")

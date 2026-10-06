@@ -38,9 +38,9 @@ public struct ClaudeCodeAdapter: AgentAdapter {
                                  cache: SessionCache? = nil) throws -> [AgentSession] {
         let slug = Self.projectSlug(for: repositoryPath)
         let fm = FileManager.default
-        guard let directories = try? fm.contentsOfDirectory(
+        let directories = try fm.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
-        ) else { return [] }
+        )
 
         let matching = directories.filter { url in
             let name = url.lastPathComponent
@@ -49,9 +49,9 @@ public struct ClaudeCodeAdapter: AgentAdapter {
 
         var files: [String] = []
         for directory in matching {
-            guard let entries = try? fm.contentsOfDirectory(
+            let entries = try fm.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil
-            ) else { continue }
+            )
             files.append(contentsOf: entries.filter { $0.pathExtension == "jsonl" }.map(\.path))
         }
         return ConcurrentParse.sessions(in: files) { parse(file: $0, cache: cache) }

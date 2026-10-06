@@ -61,10 +61,14 @@ public struct PlaceRecall: Sendable {
     }
 
     public var gaps: [Gap]
+    /// Enabled agent sources that could not be read. Results from other sources
+    /// remain visible; these failures prevent an empty result from looking final.
+    public var sourceFailures: [String]
 
     public init(
         path: String, name: String, git: GitState? = nil, brief: ResumeBrief? = nil,
-        note: ProjectNote? = nil, live: LiveProject? = nil, gaps: [Gap] = []
+        note: ProjectNote? = nil, live: LiveProject? = nil, gaps: [Gap] = [],
+        sourceFailures: [String] = []
     ) {
         self.path = path
         self.name = name
@@ -73,6 +77,7 @@ public struct PlaceRecall: Sendable {
         self.note = note
         self.live = live
         self.gaps = gaps
+        self.sourceFailures = sourceFailures
     }
 
     // MARK: - What to lead with
@@ -173,6 +178,9 @@ public struct PlaceRecall: Sendable {
     /// user their work left no trace when in fact FlowTrace was never allowed
     /// to look for one.
     public var intentAbsence: String {
+        if !sourceFailures.isEmpty {
+            return "FlowTrace could not read all enabled agent conversations here, so this answer may be incomplete."
+        }
         if gaps.contains(.transcriptsNotAllowed) {
             return "FlowTrace hasn't read agent conversations here, so it can't say what this was for."
         }
@@ -235,8 +243,13 @@ public struct PlaceRecallBuilder: Sendable {
         var opened = config
         opened.quietHours = 0
 
-        recall.brief = briefs.build(repositoryPath: path, sources: sources, config: opened)
-        if recall.brief == nil {
+        var sourceFailures: [String] = []
+        recall.brief = briefs.build(
+            repositoryPath: path, sources: sources, config: opened,
+            onReadFailure: { sourceFailures.append($0) }
+        )
+        recall.sourceFailures = sourceFailures
+        if recall.brief == nil, recall.sourceFailures.isEmpty {
             // BriefBuilder can be silent for several reasons: no session,
             // stale work, no useful text, or a read failure. Git's last commit
             // cannot distinguish them, so the screen does not guess.
