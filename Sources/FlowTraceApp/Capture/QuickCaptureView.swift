@@ -138,7 +138,9 @@ struct QuickCaptureView: View {
             return "FlowTrace can't read \(resolved.appName)'s tabs, so the note lands on the app."
         }
         if resolved.isBrowser {
-            return "Reading the tab…"
+            return enrichmentFinished
+                ? "Couldn't read this tab. The note lands on \(resolved.appName)."
+                : "Reading the tab…"
         }
         if !AccessibilityPermission.isGranted {
             return "No window title — grant Accessibility in Settings and entries say which window."

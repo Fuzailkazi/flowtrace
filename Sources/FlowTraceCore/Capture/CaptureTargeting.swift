@@ -123,6 +123,14 @@ public enum CaptureTargeting {
         // stays open forever — so a capture is a point, complete in itself.
         guard recording else { return .recordPoint(event(for: site, at: now, closed: true)) }
 
+        // A browser without a resolved URL may be on a different tab from the
+        // recorder's last sample. The open span cannot identify this note's
+        // page, even if it belongs to the same browser. Keep the note as an
+        // app-level point instead of attaching it to a possibly wrong tab.
+        guard !(site.isBrowser && site.url == nil) else {
+            return .recordPoint(event(for: site, at: now, closed: true))
+        }
+
         guard let open, isSameApp(open, site) else {
             return .beginSpan(event(for: site, at: now, closed: false))
         }
@@ -152,8 +160,8 @@ public enum CaptureTargeting {
     public static func prefill(
         open: ActivityEvent?, site: CaptureSite, recording: Bool, now: Date = Date()
     ) -> String? {
-        // Mid-read, the open span may still be the tab you just left.
-        if site.isBrowser, site.url == nil, !site.automationDenied { return nil }
+        // Without a resolved tab, the open span may be the page you just left.
+        if site.isBrowser, site.url == nil { return nil }
         guard case .annotateOpen(let event, _, _, _) = plan(
             open: open, site: site, recording: recording, now: now
         ) else { return nil }

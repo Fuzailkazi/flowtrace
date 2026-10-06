@@ -150,12 +150,26 @@ func runCaptureTargetingTests() {
         ))
     }
 
-    // Denied is different from not-yet-read: the url will never arrive.
-    TestKit.test("a browser that refused access pre-fills the open span's note") {
-        expectEqual(CaptureTargeting.prefill(
+    TestKit.test("an unresolved browser tab never uses the recorder's previous page") {
+        for denied in [false, true] {
+            let open = span(note: "the previous tab's reason")
+            let there = site(title: "Current browser window", url: nil, denied: denied)
+            guard case .recordPoint(let event) = CaptureTargeting.plan(
+                open: open, site: there, recording: true, now: now
+            ) else { TestKit.fail("expected an app-level point"); return }
+            expectEqual(event.kind, .app)
+            expectNil(event.url)
+            expectEqual(event.target, "Current browser window")
+            expectEqual(event.endedAt, now)
+            expectNil(CaptureTargeting.prefill(open: open, site: there, recording: true))
+        }
+    }
+
+    TestKit.test("a browser denied tab access does not pre-fill an app span's note") {
+        expectNil(CaptureTargeting.prefill(
             open: span(title: "Safari", url: nil, note: "reading the docs"),
             site: site(url: nil, denied: true), recording: true
-        ), "reading the docs")
+        ))
     }
 
     TestKit.test("a non-browser app pre-fills the open span's note") {
