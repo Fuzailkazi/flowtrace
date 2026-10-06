@@ -2,16 +2,16 @@
 
 **Launch type:** private, observed beta for 8–10 Mac developers using several coding-agent sessions across at least two repositories. **Date:** TBD after the product owner chooses the first problem to prove. **Public release:** separate gate.
 
-**Current internal candidate:** `/tmp/flowtrace-beta-candidate-2026-10-06-v2/FlowTrace-0.1.1-build2-macOS.zip` (SHA-256 `100b24c00309aabe02d32d4dacb40df7b3b687292a4f9695fae076b38e0b92ec`, 4.4 MB). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `2`, built from a dirty working tree. The extracted bundle passed plist and signature-integrity checks. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature. **This is an internal review artifact, not a public release or a frozen beta build.** The prior v0.1.0 internal candidate remains at `/tmp/flowtrace-beta-candidate-2026-10-06/FlowTrace-2026-10-06-INTERNAL-ad-hoc.zip`.
+**Current internal candidate:** `/tmp/flowtrace-beta-frozen-b1832ed/FlowTrace-0.1.1-build3-macOS.zip` (SHA-256 `1ef9321e8f5913b2c2ba3fc2fc47554f968901774429a24f229bd96581af7ca1`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `3`, built from an export of commit `b1832edbbb27350c3e04b6122a38dc230e5f2c2b` on `codex/flowtrace-beta-prep`. The clean exported source built the app and CLI; the extracted ZIP passed plist and signature-integrity checks. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
 
-The current candidate's tracked source baseline is Git `0ed27ab4ebe51cf3b2da08224df7c84c2f70439e` plus `/tmp/flowtrace-beta-candidate-2026-10-06-v2/source-changes.patch` (SHA-256 `8b7ed62b021775af23f2043dfc2b364a219fd7be16b274b437361032bb9d83dc`). This is a review aid, not a frozen release revision; local untracked and ignored files are not included in that patch.
+Previous ad-hoc candidates were built from a dirty working tree. Build 3 supersedes them for internal review. The commit excludes a pre-existing clickable-title edit still present in the working tree; that separate edit is not in this archive.
 
 ## Before inviting participants (T-2w to T-1d)
 
 ### Product and engineering
 
 - [ ] Choose the beta's primary recovery job from [PRODUCT_DIRECTION_DECISION.md](PRODUCT_DIRECTION_DECISION.md). — **Owner:** Product owner — **Blocking:** Yes — **Due:** T-2w
-- [ ] Freeze a reviewable source revision and assign a unique beta version and build number; rebuild the archive from that exact revision. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
+- [x] Freeze a reviewable source revision and assign a unique beta version and build number; rebuild the archive from that exact revision. Commit `b1832ed`, 0.1.1 build 3. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
 - [ ] Run the full test suite, debug/release builds, archive verification, and a fresh-profile capture → search → recovery walkthrough on the frozen revision. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
 - [ ] Check a clean macOS user account for first launch, source consent, shortcut, history scan including a clean repository, handoff, relaunch, export, and delete. Record failures. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
 - [ ] Decide the install route: use a Developer ID signed and notarized ZIP for unassisted installs; if an observed technical beta uses ad-hoc signing, disclose the extra macOS opening step and record it as install friction. — **Owner:** Product owner + Engineering — **Blocking:** Yes — **Due:** T-1w
