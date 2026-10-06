@@ -36,6 +36,19 @@ func runMemorySearchTests() {
         expectEqual(hits.first?.title, "billing", "found under the place it happened")
     }
 
+    TestKit.test("a closed capture point is findable without a separate annotate") {
+        let store = try store()
+        let now = Date()
+        let event = try store.recordActivity(ActivityEvent(
+            kind: .app, startedAt: now, endedAt: now, appName: "ChatGPT",
+            note: "remember the webhook retry decision", noteAt: now
+        ))
+
+        let hits = try store.searchMemories("webhook retry")
+        expectEqual(hits.map(\.recordId), [event.id])
+        expectEqual(hits.first?.matchQuality, .allTerms)
+    }
+
     // The point of the index over a substring filter: "auth" has to find
     // "authentication", which `contains` does and stemming does better.
     TestKit.test("a partial word finds the whole one") {
@@ -43,6 +56,48 @@ func runMemorySearchTests() {
         try remember("came back to finish the authentication rewrite", into: store)
         expect(!(try store.search("auth").isEmpty))
         expect(!(try store.search("rewrite").isEmpty))
+    }
+
+    TestKit.test("ordinary recall phrasing ignores filler words") {
+        let store = try store()
+        let note = try remember("waiting on the Stripe webhook docs", into: store)
+        let hits = try store.searchMemories("what was I doing with the webhook")
+        expectEqual(hits.map(\.recordId), [note.id])
+        expectEqual(hits.first?.matchQuality, .allTerms)
+    }
+
+    TestKit.test("a failed all-word query offers labelled partial matches") {
+        let store = try store()
+        let note = try remember("Stripe pricing draft", into: store)
+        let hits = try store.searchMemories("Stripe pricing page")
+        expect(hits.contains { $0.recordId == note.id })
+        expect(hits.allSatisfy { $0.matchQuality == .partial },
+               "the UI must be able to label the weaker result")
+        expectEqual(try store.searchMemories("Stripe pricing").first?.matchQuality, .allTerms)
+    }
+
+    TestKit.test("search retrieves a memory older than the recent page") {
+        let store = try store()
+        let old = try remember("the old webhook answer", into: store,
+                               at: Date().addingTimeInterval(-86_400 * 500))
+        for number in 0..<401 {
+            try remember("new note \(number)", into: store)
+        }
+        expect(!((try store.notedActivity(limit: 400)).contains { $0.id == old.id }),
+               "the old note is outside the recent page")
+        let ids = try store.searchMemories("webhook").filter { $0.kind == .memory }.map(\.recordId)
+        let found = try store.notedActivity(ids: ids)
+        expectEqual(found.map(\.id), [old.id], "search loads the old note by id")
+    }
+
+    TestKit.test("thread hits cannot use up the memories result limit") {
+        let store = try store()
+        let old = try remember("webhook answer", into: store)
+        for number in 0..<205 {
+            _ = try store.create(WorkThread(title: "webhook thread \(number)"))
+        }
+        let ids = try store.searchMemories("webhook", limit: 10).map(\.recordId)
+        expectEqual(ids, [old.id])
     }
 
     TestKit.test("the place a memory happened is searchable, not just the words") {
@@ -199,5 +254,29 @@ func runMemorySearchTests() {
         try reopened.reindexMemories()
         expectEqual(try reopened.search("webhook").count, 1, "the memory came back")
         expectEqual(try reopened.search("refund").count, 1, "and so did the project note")
+    }
+
+    TestKit.test("upgrade repairs capture points missed by the old write path") {
+        let file = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("flowtrace-capture-repair-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let id: String
+        do {
+            let store = Store(database: try FlowTraceDatabase(url: file))
+            let now = Date()
+            id = try store.recordActivity(ActivityEvent(
+                kind: .app, startedAt: now, endedAt: now, appName: "ChatGPT",
+                note: "remember the webhook retry decision", noteAt: now
+            )).id
+            try store.database.writer.write { db in
+                try db.execute(sql: "DELETE FROM searchIndex WHERE kind = 'memory' AND recordId = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v8.indexCapturePoints'")
+            }
+            expect(try store.searchMemories("webhook retry").isEmpty)
+        }
+
+        let reopened = Store(database: try FlowTraceDatabase(url: file))
+        expectEqual(try reopened.searchMemories("webhook retry").map(\.recordId), [id])
     }
 }

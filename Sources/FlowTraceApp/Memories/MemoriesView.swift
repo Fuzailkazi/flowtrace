@@ -4,26 +4,29 @@ import FlowTraceCore
 
 /// Everything you wrote down, across days.
 ///
-/// A memory is an activity row with a note on it — nothing more. There are no
-/// screenshots and no index behind this screen: it loads the noted rows once
-/// and filters them in memory as you type.
+/// A memory is an activity row with a note on it. The recent page is loaded for
+/// browsing; search uses the index and fetches its matches from the full history.
 struct MemoriesView: View {
     @Bindable var model: AppModel
 
     @State private var memories: [ActivityEvent] = []
+    @State private var searchedMemories: [ActivityEvent] = []
     @State private var projects: [ProjectNote] = []
     @State private var loading = true
     /// A failed load. A toast says it once and goes; this screen is the record
     /// of everything you wrote, so an unreadable one has to keep saying so
     /// rather than looking like you never wrote anything.
     @State private var failure: String?
+    @State private var searchFailure: String?
+    @State private var searchIsPartial = false
     @State private var query = ""
     /// Ids of the memories the index matched, in the order it ranked them.
     ///
     /// The screen used to filter the loaded rows with `contains`, which meant
     /// "auth" never found "authentication", nothing was ranked, and anything
     /// past the four-hundred-row load simply did not exist. The index answers
-    /// all three. Nil means no search is running, which is different from a
+    /// all three. Matches are loaded separately so a note older than the
+    /// recent page can still appear. Nil means no search is running, which is different from a
     /// search that matched nothing.
     @State private var matches: [String]?
     @State private var matchedPlaces: [String] = []
@@ -53,6 +56,14 @@ struct MemoriesView: View {
                 }
                 today
                 searchField
+                if let searchFailure {
+                    LoadFailureNotice(message: searchFailure) { Task { await runSearch(query) } }
+                }
+                if searchIsPartial {
+                    Text("No result matched every word. Showing partial matches.")
+                        .font(.observed(12))
+                        .foregroundStyle(Journal.inkMid)
+                }
                 filterChips
                 stream
                 if !visibleProjects.isEmpty { building }
@@ -94,7 +105,7 @@ struct MemoriesView: View {
             }
             Spacer(minLength: Journal.Space.l)
             HStack(spacing: Journal.Space.m) {
-                Label("\(memories.count) memor\(memories.count == 1 ? "y" : "ies")", systemImage: "note.text")
+                Label(memoryCountLabel, systemImage: "note.text")
                 Text("·").foregroundStyle(Journal.ruleFirm)
                 Label("on this Mac", systemImage: "internaldrive")
             }
@@ -105,6 +116,14 @@ struct MemoriesView: View {
             .background(Journal.wash, in: Capsule())
             .padding(.top, Journal.Space.xl)
         }
+    }
+
+    private var memoryCountLabel: String {
+        if matches != nil {
+            return "\(searchedMemories.count) match\(searchedMemories.count == 1 ? "" : "es")"
+        }
+        if memories.count == 400 { return "400 recent memories" }
+        return "\(memories.count) memor\(memories.count == 1 ? "y" : "ies")"
     }
 
     // MARK: - Today
@@ -280,7 +299,7 @@ struct MemoriesView: View {
     private var visible: [ActivityEvent] {
         let calendar = Calendar.current
         let now = Date()
-        return memories.filter { event in
+        return (matches == nil ? memories : searchedMemories).filter { event in
             let passesFilter: Bool = switch filter {
             case .all: true
             case .today: calendar.isDate(event.startedAt, inSameDayAs: now)
@@ -314,17 +333,47 @@ struct MemoriesView: View {
     /// way to a real query.
     private func runSearch(_ raw: String) async {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
         guard text.count >= 2 else {
             matches = nil
+            searchedMemories = []
             matchedPlaces = []
+            searchFailure = nil
+            searchIsPartial = false
             return
         }
+        matches = []
+        searchedMemories = []
+        matchedPlaces = []
+        searchFailure = nil
+        searchIsPartial = false
         let store = model.store
-        let hits = await Task.detached(priority: .userInitiated) {
-            (try? store.search(text, limit: 200)) ?? []
+        let result = await Task.detached(priority: .userInitiated) {
+            () -> Result<([String], [ActivityEvent], [String], Bool), Error> in
+            do {
+                let hits = try store.searchMemories(text, limit: 200)
+                let ids = hits.filter { $0.kind == .memory }.map(\.recordId)
+                return .success((
+                    ids,
+                    try store.notedActivity(ids: ids),
+                    hits.filter { $0.kind == .place }.map(\.recordId),
+                    hits.first?.matchQuality == .partial
+                ))
+            } catch {
+                return .failure(error)
+            }
         }.value
-        matches = hits.filter { $0.kind == .memory }.map(\.recordId)
-        matchedPlaces = hits.filter { $0.kind == .place }.map(\.recordId)
+        // Results may return out of order as the person continues typing.
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+        switch result {
+        case .success(let (ids, events, places, isPartial)):
+            matches = ids
+            searchedMemories = events
+            matchedPlaces = places
+            searchIsPartial = isPartial
+        case .failure(let error):
+            searchFailure = "Search failed: \(error.localizedDescription)"
+        }
     }
 
     private var stream: some View {
@@ -333,7 +382,7 @@ struct MemoriesView: View {
                 Text("Memory Stream")
                     .font(.journalTitle(17))
                     .foregroundStyle(Journal.ink)
-                WashChip("Newest first", mono: true)
+                WashChip(matches == nil ? "Newest first" : "Best matches first", mono: true)
                 Spacer()
                 HStack(spacing: 2) {
                     layoutToggle(.grid, systemImage: "square.grid.2x2", help: "Grid")

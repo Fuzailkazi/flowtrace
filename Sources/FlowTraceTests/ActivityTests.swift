@@ -641,6 +641,34 @@ func runErasureTests() {
         expectNil(try store.noteForTab(url: "https://pencil.com"), "page note")
     }
 
+    TestKit.test("delete all removes text from the database file and WAL") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flowtrace-erase-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("flowtrace.sqlite")
+        let marker = "sensitive-erase-marker-\(UUID().uuidString)"
+        let store = try Store(url: file)
+        _ = try store.saveProjectNote(ProjectNote(
+            repositoryPath: "/p/acme", repositoryName: "acme", building: marker
+        ))
+        let files = ["", "-wal", "-shm"].map {
+            URL(fileURLWithPath: file.path + $0)
+        }
+        let markerBytes = Data(marker.utf8)
+        let before = try files.filter { FileManager.default.fileExists(atPath: $0.path) }
+            .map { try Data(contentsOf: $0) }
+        expect(before.contains { $0.range(of: markerBytes) != nil },
+               "precondition: the sensitive text reached the database files")
+        try store.deleteAllData()
+        expectNil(try store.projectNote(for: "/p/acme"))
+        for candidate in files {
+            guard FileManager.default.fileExists(atPath: candidate.path) else { continue }
+            let bytes = try Data(contentsOf: candidate)
+            expect(bytes.range(of: markerBytes) == nil,
+                   "deleted note text remains in \(candidate.lastPathComponent)")
+        }
+    }
+
     // The distinction people actually want: erase the surveillance, keep the
     // journal.
     TestKit.test("erasing what was recorded automatically keeps what you wrote") {

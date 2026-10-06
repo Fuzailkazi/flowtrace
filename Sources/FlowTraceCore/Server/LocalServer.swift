@@ -145,6 +145,14 @@ public final class LocalServer {
         LocalCredentials.clearPublishedPort()
     }
 
+    /// After stop, wait for requests already accepted by this server to finish
+    /// before erasing the database they could still write to.
+    public func settled() async {
+        await withCheckedContinuation { continuation in
+            queue.async(flags: .barrier) { continuation.resume() }
+        }
+    }
+
     deinit {
         acceptSource?.cancel()
     }

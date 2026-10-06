@@ -10,6 +10,18 @@ import FlowTraceCore
 func runPrivacyTests() {
     TestKit.suite("Credential shapes")
 
+    TestKit.test("erasing a profile removes its local server token") {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flowtrace-token-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let token = directory.appendingPathComponent("api-token")
+        try Data("disposable-token".utf8).write(to: token)
+        try LocalCredentials.clearToken(at: token)
+        expect(!FileManager.default.fileExists(atPath: token.path))
+        try LocalCredentials.clearToken(at: token)
+    }
+
     // Each provider's prefix, with a body just over FlowTrace's threshold.
     TestKit.test("every prefix FlowTrace knows about is removed") {
         let cases: [(String, String, String)] = [

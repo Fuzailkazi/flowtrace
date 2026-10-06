@@ -58,18 +58,30 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }
 
     public func discoverSessions(cache: SessionCache? = nil) throws -> [AgentSession] {
+        try discoverSessionsWithDiagnostics(cache: cache).sessions
+    }
+
+    public func discoverSessionsWithDiagnostics(cache: SessionCache? = nil) throws -> AgentDiscovery {
         let fm = FileManager.default
-        guard let projectDirs = try? fm.contentsOfDirectory(
-            at: root, includingPropertiesForKeys: nil
-        ) else { return [] }
+        let projectDirs = try fm.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
 
         var files: [String] = []
+        var skippedDirectories = 0
         for dir in projectDirs {
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: dir.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
             guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
-            else { continue }
+            else { skippedDirectories += 1; continue }
             files.append(contentsOf: entries.filter { $0.pathExtension == "jsonl" }.map(\.path))
         }
-        return ConcurrentParse.sessions(in: files) { parse(file: $0, cache: cache) }
+        let parsed = ConcurrentParse.report(in: files) { parse(file: $0, cache: cache) }
+        return AgentDiscovery(
+            sessions: parsed.sessions, skippedFiles: parsed.skippedFiles,
+            skippedDirectories: skippedDirectories
+        )
     }
 
     func parse(file path: String, cache: SessionCache?) -> AgentSession? {

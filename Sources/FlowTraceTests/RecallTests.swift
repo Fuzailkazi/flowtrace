@@ -165,7 +165,8 @@ func runRecallTests() {
     // false and the opposite of the consent promise.
     TestKit.test("an unread place is never told it left no trace") {
         let unread = builder.build(path: scratch.path, name: "acme", sources: .none)
-        expect(unread.intentAbsence.contains("hasn't read"), "got: \(unread.intentAbsence)")
+        expect(unread.intentAbsence.contains("hasn't read agent conversations"),
+               "got: \(unread.intentAbsence)")
         expect(!unread.intentAbsence.contains("nothing recorded"))
 
         let looked = PlaceRecall(path: scratch.path, name: "acme", gaps: [.noSessionsFound])
@@ -229,11 +230,50 @@ func runRecallTests() {
     // rendering, the recovery button copies an empty string and the user finds
     // out by pasting it.
     TestKit.test("the handoff text names the place and what was happening") {
-        let text = brief(title: "Refactoring the importer", prompts: ["fix the flaky test"]).render()
+        let recall = PlaceRecall(
+            path: scratch.path, name: "acme",
+            brief: brief(title: "Refactoring the importer", prompts: ["fix the flaky test"]),
+            note: note(building: "the billing rewrite", nextStep: "run the migration")
+        )
+        let text = try unwrap(recall.handoff)
         expect(text.contains("acme"), "names the place")
+        expect(text.contains(scratch.path), "names the repository path")
         expect(text.contains("main"), "names the branch")
         expect(text.contains("Refactoring the importer"), "carries what the session was about")
+        expect(text.contains("the billing rewrite"), "includes the person's own description")
+        expect(text.contains("run the migration"), "includes the person's next step")
+        if let own = text.range(of: "the billing rewrite"),
+           let inferred = text.range(of: "Refactoring the importer") {
+            expect(own.lowerBound < inferred.lowerBound,
+                   "the person's own words lead the inferred history")
+        }
         expect(!text.isEmpty)
+    }
+
+    TestKit.test("a note can be handed off without a transcript and secrets are removed") {
+        let secret = "sk_" + "live_" + "51H8xQ2eZvKYlo2C" + "abcdefghijklmnopQ"
+        let recall = PlaceRecall(
+            path: scratch.path, name: "acme",
+            note: note(building: "finish auth", nextStep: "replace \(secret) before release")
+        )
+        let text = try unwrap(recall.handoff)
+        expectContains(text, "finish auth")
+        expectContains(text, "replace [api key removed] before release")
+        expectNotContains(text, secret)
+        expectNil(PlaceRecall(path: scratch.path, name: "acme").handoff)
+    }
+
+    TestKit.test("a live prompt can be handed off without a saved brief") {
+        let secret = "sk_" + "live_" + "51H8xQ2eZvKYlo2C" + "abcdefghijklmnopQ"
+        let recall = PlaceRecall(
+            path: scratch.path, name: "acme",
+            live: liveAgent("resume the parser after checking \(secret)")
+        )
+        let text = try unwrap(recall.handoff)
+        expectContains(text, scratch.path)
+        expectContains(text, "Last observed agent prompt: resume the parser")
+        expectContains(text, "[api key removed]")
+        expectNotContains(text, secret)
     }
 
     TestKit.test("a place still holding a port is worth mentioning") {

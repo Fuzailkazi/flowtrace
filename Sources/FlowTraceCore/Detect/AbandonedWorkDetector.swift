@@ -63,11 +63,28 @@ public struct ScanProgress: Sendable {
 
 public struct ScanResult: Sendable {
     public var proposals: [ThreadProposal]
+    /// Recent repositories with a dated human turn in agent history, whether
+    /// or not git has uncommitted work. These are places to browse, not
+    /// unfinished-work claims.
+    public var recentPlaces: [RecentSessionPlace]
+    /// A scan can still find useful places when one selected source failed.
+    public var sourceFailures: [String]
+    public var sourceWarnings: [String]
+    public var sourcesRead: Int
     public var sessionsScanned: Int
     public var repositoriesProbed: Int
     /// Working directories from sessions that no longer exist on disk.
     public var missingPaths: Int
     public var duration: TimeInterval
+}
+
+public struct RecentSessionPlace: Identifiable, Sendable {
+    public var id: String { path }
+    public var path: String
+    public var name: String
+    public var agent: AgentName
+    public var updatedAt: Date
+    public var title: String?
 }
 
 /// Finds work that was started and never finished.
@@ -105,13 +122,34 @@ public final class AbandonedWorkDetector {
         // 1. Read every discoverable agent session.
         progress?(ScanProgress(phase: "Reading agent sessions", completed: 0, total: adapters.count))
         var sessions: [AgentSession] = []
-        for (index, adapter) in adapters.enumerated() where adapter.isAvailable {
-            sessions.append(contentsOf: (try? adapter.discoverSessions(cache: cache)) ?? [])
+        var sourceFailures: [String] = []
+        var sourceWarnings: [String] = []
+        var sourcesRead = 0
+        for (index, adapter) in adapters.enumerated() {
+            try Task.checkCancellation()
+            if adapter.isAvailable {
+                do {
+                    let discovery = try adapter.discoverSessionsWithDiagnostics(cache: cache)
+                    sessions.append(contentsOf: discovery.sessions)
+                    sourcesRead += 1
+                    if discovery.skippedDirectories > 0 {
+                        sourceWarnings.append("\(adapter.agent.label): \(discovery.skippedDirectories) project directories could not be listed")
+                    }
+                    if discovery.skippedFiles > 0 {
+                        sourceWarnings.append("\(adapter.agent.label): \(discovery.skippedFiles) candidate session files yielded no usable session")
+                    }
+                } catch {
+                    sourceFailures.append("\(adapter.agent.label): \(error.localizedDescription)")
+                }
+            } else {
+                sourceFailures.append("\(adapter.agent.label): session files are not available")
+            }
             progress?(ScanProgress(
                 phase: "Reading \(adapter.agent.label) sessions",
                 completed: index + 1, total: adapters.count
             ))
         }
+        try Task.checkCancellation()
 
         let cutoff = Calendar.current.date(
             byAdding: .day, value: -config.lookbackDays, to: Date()
@@ -143,6 +181,7 @@ public final class AbandonedWorkDetector {
                 ))
             }
         }
+        try Task.checkCancellation()
 
         var repoSessions: [String: [AgentSession]] = [:]
         var missingPaths = 0
@@ -152,6 +191,35 @@ public final class AbandonedWorkDetector {
             guard !ignoredPaths.contains(top) else { continue }
             repoSessions[top, default: []].append(session)
         }
+
+        // A clean repository can still contain the session somebody is trying
+        // to remember. Only dated human turns qualify: unattended agent writes
+        // must not masquerade as places the person recently visited.
+        let browseCutoff = Date().addingTimeInterval(-30 * 86_400)
+        let recentPlaces = repoSessions.compactMap { entry -> RecentSessionPlace? in
+            let (path, group) = entry
+            guard !config.isNoise(path),
+                  let newest = group.filter({ $0.lastHumanActivityAt != nil }).max(by: {
+                      ($0.lastHumanActivityAt ?? .distantPast)
+                          < ($1.lastHumanActivityAt ?? .distantPast)
+                  }),
+                  let updatedAt = newest.lastHumanActivityAt,
+                  updatedAt >= browseCutoff else { return nil }
+            let sourceTitle = newest.title ?? newest.recentPrompts.last
+            let safeTitle = sourceTitle.flatMap { source -> String? in
+                let redacted = Redaction.redact(source)
+                guard !redacted.isEmpty, !Redaction.isOnlyRedactions(redacted) else { return nil }
+                return AgentSession.condense(redacted.text, limit: 100)
+            }
+            return RecentSessionPlace(
+                path: path,
+                name: SessionImporter.folderLabel(for: path),
+                agent: newest.agent,
+                updatedAt: updatedAt,
+                title: safeTitle
+            )
+        }
+        .sorted { $0.updatedAt > $1.updatedAt }
 
         // 3. Probe git state once per repository and score it, again concurrently.
         progress?(ScanProgress(phase: "Checking git state", completed: 0, total: repoSessions.count))
@@ -171,11 +239,16 @@ public final class AbandonedWorkDetector {
                 phase: "Checking git state", completed: done, total: repos.count
             ))
         }
+        try Task.checkCancellation()
 
         proposals.sort { $0.score > $1.score }
 
         return ScanResult(
             proposals: Array(proposals.prefix(config.maxProposals)),
+            recentPlaces: Array(recentPlaces.prefix(12)),
+            sourceFailures: sourceFailures,
+            sourceWarnings: sourceWarnings,
+            sourcesRead: sourcesRead,
             sessionsScanned: sessions.count,
             repositoriesProbed: repoSessions.count,
             missingPaths: missingPaths,

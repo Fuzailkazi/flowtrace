@@ -39,6 +39,14 @@ public enum LocalCredentials {
         FlowTraceDatabase.supportDirectory.appendingPathComponent("api-token")
     }
 
+    /// Remove the local capability when the user erases all FlowTrace data.
+    /// A later server start creates a new token, so old extension copies cannot
+    /// silently resume writing after an erase.
+    public static func clearToken(at url: URL = tokenFileURL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+
     private static func generate() -> String {
         var bytes = [UInt8](repeating: 0, count: 24)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)

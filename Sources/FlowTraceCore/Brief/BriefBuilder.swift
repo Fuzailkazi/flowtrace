@@ -23,15 +23,18 @@ public struct BriefBuilder: Sendable {
     private let git: GitProbe
     private let claude: ClaudeCodeAdapter
     private let codex: CodexAdapter
+    private let openCodeDatabase: URL
 
     public init(
         git: GitProbe = GitProbe(),
         claude: ClaudeCodeAdapter = ClaudeCodeAdapter(),
-        codex: CodexAdapter = CodexAdapter()
+        codex: CodexAdapter = CodexAdapter(),
+        openCodeDatabase: URL = OpenCodeStore.defaultDatabase
     ) {
         self.git = git
         self.claude = claude
         self.codex = codex
+        self.openCodeDatabase = openCodeDatabase
     }
 
     /// Returns nil when there is nothing worth saying — see the silence rules in
@@ -89,10 +92,17 @@ public struct BriefBuilder: Sendable {
         guard hasLooseEnds || !sessions.isEmpty else { return nil }
 
         let (prompts, redactions) = promptArc(from: sessions, limit: config.maxPrompts)
+        // A title belongs to a session, not the repository. If the newest
+        // session has no title, an older title would mislabel its newer prompt
+        // as a different piece of work on the recovery screen.
+        let sessionTitle = sessions.last.flatMap { session -> String? in
+            guard let title = session.title, !title.isEmpty else { return nil }
+            return title
+        }
 
-        // A brief with no state and no recallable prompts is just a repository
-        // name and a date. Not worth a single token of the user's context.
-        guard hasLooseEnds || !prompts.isEmpty else { return nil }
+        // OpenCode supplies a redacted session title rather than user prompts.
+        // That title is still useful recall even when the working tree is clean.
+        guard hasLooseEnds || !prompts.isEmpty || sessionTitle != nil else { return nil }
 
         return ResumeBrief(
             repositoryName: state.repositoryName,
@@ -105,7 +115,7 @@ public struct BriefBuilder: Sendable {
             unpushedCount: state.commitsAhead,
             lastCommitSubject: state.lastCommitSubject,
             recentPrompts: prompts,
-            sessionTitle: sessions.last(where: { !($0.title ?? "").isEmpty })?.title,
+            sessionTitle: sessionTitle,
             redactionCount: redactions,
             elapsedIsHuman: humanActivity != nil
         )
@@ -137,9 +147,29 @@ public struct BriefBuilder: Sendable {
             })
         }
 
-        return found.sorted {
-            ($0.lastActivityAt ?? .distantPast) < ($1.lastActivityAt ?? .distantPast)
+        if sources.allows(.openCode) {
+            let root = FilePathCanon.canonical(repositoryPath)
+            if let (directory, entry) = OpenCodeStore.sessionsByDirectory(at: openCodeDatabase)
+                .filter({ $0.key == root || $0.key.hasPrefix(root + "/") })
+                .max(by: { $0.value.modifiedAt < $1.value.modifiedAt }),
+               let title = entry.lastPrompt, !title.isEmpty {
+                found.append(AgentSession(
+                    id: entry.sessionId ?? directory,
+                    agent: .openCode,
+                    cwd: directory,
+                    title: title,
+                    lastActivityAt: entry.modifiedAt,
+                    filePath: openCodeDatabase.path
+                ))
+            }
         }
+
+        // A fresh Git commit does not make an old agent title or prompt fresh.
+        // Filter each session before choosing the title and prompt arc.
+        let cutoff = Date().addingTimeInterval(-Double(config.staleDays) * 86_400)
+        return found
+            .filter { ($0.lastActivityAt ?? .distantPast) >= cutoff }
+            .sorted { ($0.lastActivityAt ?? .distantPast) < ($1.lastActivityAt ?? .distantPast) }
     }
 
     /// The last few things the user actually asked, redacted, oldest first.

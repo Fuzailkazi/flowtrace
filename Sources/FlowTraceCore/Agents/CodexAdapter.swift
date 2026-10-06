@@ -20,6 +20,11 @@ public struct CodexAdapter: AgentAdapter {
     private var sessionsRoot: URL { root.appendingPathComponent("sessions", isDirectory: true) }
     private var indexFile: URL { root.appendingPathComponent("session_index.jsonl") }
 
+    private struct SessionDirectoryError: LocalizedError {
+        let path: String
+        var errorDescription: String? { "Could not list sessions at \(path)" }
+    }
+
     public var searchPaths: [String] { [sessionsRoot.path, indexFile.path] }
 
     /// Codex stores rollouts by date, not by path, so there is no cheap way to
@@ -33,7 +38,7 @@ public struct CodexAdapter: AgentAdapter {
         guard let walker = fm.enumerator(
             at: sessionsRoot, includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
-        ) else { return [] }
+        ) else { throw SessionDirectoryError(path: sessionsRoot.path) }
 
         var files: [String] = []
         for case let url as URL in walker {
@@ -53,13 +58,17 @@ public struct CodexAdapter: AgentAdapter {
     }
 
     public func discoverSessions(cache: SessionCache? = nil) throws -> [AgentSession] {
+        try discoverSessionsWithDiagnostics(cache: cache).sessions
+    }
+
+    public func discoverSessionsWithDiagnostics(cache: SessionCache? = nil) throws -> AgentDiscovery {
         let titles = loadTitles()
         let fm = FileManager.default
         guard let walker = fm.enumerator(
             at: sessionsRoot,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ) else { return [] }
+        ) else { throw SessionDirectoryError(path: sessionsRoot.path) }
 
         var files: [String] = []
         for case let url as URL in walker {
@@ -69,11 +78,12 @@ public struct CodexAdapter: AgentAdapter {
             files.append(url.path)
         }
 
-        return ConcurrentParse.sessions(in: files) { path in
+        let parsed = ConcurrentParse.report(in: files) { path in
             guard var session = parse(file: path, cache: cache) else { return nil }
             if session.title == nil { session.title = titles[session.id] }
             return session
         }
+        return AgentDiscovery(sessions: parsed.sessions, skippedFiles: parsed.skippedFiles)
     }
 
     /// `session_index.jsonl` → `{ id: thread_name }`.

@@ -18,6 +18,28 @@ func runAdapterTests(fixtures: URL) {
         expectEqual(session.firstPrompt, "add google oauth to the login page")
     }
 
+    TestKit.test("reports candidate files that do not yield a usable session") {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("flowtrace-adapter-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = root.appendingPathComponent("-Users-dev-acme")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let fixture = fixtures.appendingPathComponent(
+            "claude/-Users-dev-acme/aaaaaaaa-1111-2222-3333-444444444444.jsonl"
+        )
+        try FileManager.default.copyItem(
+            at: fixture, to: project.appendingPathComponent("valid.jsonl")
+        )
+        try "not a session\n".write(
+            to: project.appendingPathComponent("unusable.jsonl"),
+            atomically: true, encoding: .utf8
+        )
+
+        let report = try ClaudeCodeAdapter(root: root).discoverSessionsWithDiagnostics(cache: nil)
+        expectEqual(report.sessions.count, 1)
+        expectEqual(report.skippedFiles, 1)
+    }
+
     // Claude Code injects skill bodies and slash-command expansions as user turns
     // flagged `isMeta`. Reading those as intent produced proposals titled
     // "Base directory for this skill: …", which is exactly the kind of thing that

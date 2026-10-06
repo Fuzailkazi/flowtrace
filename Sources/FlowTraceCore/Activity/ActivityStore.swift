@@ -110,7 +110,12 @@ extension Store {
     @discardableResult
     public func recordActivity(_ event: ActivityEvent) throws -> ActivityEvent {
         var event = Self.forStorage(event)
-        try database.writer.write { db in try event.insert(db) }
+        try database.writer.write { db in
+            try event.insert(db)
+            // Quick Capture writes a closed point with its note already on the
+            // event when no open span exists. Index it in this transaction too.
+            try MemoryIndexing.index(db, event: event)
+        }
         return event
     }
 
@@ -357,6 +362,18 @@ extension Store {
                 .filter(sql: "note IS NOT NULL AND note != ''")
                 .order(ActivityEvent.Columns.startedAt.desc)
                 .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    /// Fetch search matches directly. Search must not depend on the recent
+    /// memories page: an older note is often the reason someone searches.
+    public func notedActivity(ids: [String]) throws -> [ActivityEvent] {
+        guard !ids.isEmpty else { return [] }
+        return try database.writer.read { db in
+            try ActivityEvent
+                .filter(ids.contains(ActivityEvent.Columns.id))
+                .filter(sql: "note IS NOT NULL AND note != ''")
                 .fetchAll(db)
         }
     }

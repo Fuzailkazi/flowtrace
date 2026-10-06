@@ -34,6 +34,9 @@ public struct AttentionRanker: Sendable {
         }
 
         let attended = unique.values.compactMap { project -> (LiveProject, Date)? in
+            // Paused is an explicit instruction from the person, so even a
+            // recent agent turn must not turn it into a Continue nudge.
+            guard project.note?.isPaused != true else { return nil }
             guard let date = project.lastHumanActivityAt else { return nil }
             return (project, date)
         }
@@ -56,18 +59,24 @@ public struct AttentionRanker: Sendable {
             }
             .prefix(6)
             .map(\.0)
+        let highlightedPaths = continuingPaths.union(recent.map { FilePathCanon.canonical($0.path) })
 
         return AttentionSections(
             continueWork: Array(continuing),
             recent: Array(recent),
-            background: unique.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            background: unique.values
+                .filter { !highlightedPaths.contains(FilePathCanon.canonical($0.path)) }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         )
     }
 }
 
 public extension LiveProject {
-    /// The newest turn attributable to the person, never the agent heartbeat.
+    /// The newest action attributable to the person: their agent turn or their
+    /// own project note. Neither a process heartbeat nor an empty note counts.
     var lastHumanActivityAt: Date? {
-        readAgents.compactMap(\.lastHumanActivityAt).max()
+        let agentTurn = readAgents.compactMap(\.lastHumanActivityAt).max()
+        let noteWrite = note.flatMap { $0.isEmpty ? nil : $0.updatedAt }
+        return [agentTurn, noteWrite].compactMap { $0 }.max()
     }
 }

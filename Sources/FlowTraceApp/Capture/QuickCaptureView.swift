@@ -242,7 +242,7 @@ struct QuickCaptureView: View {
                         .font(.mono(10.5))
                         .foregroundStyle(Color.white.opacity(0.8))
                 } else {
-                    Text("Saved to \\(resolved.appName)")
+                    Text(saved ? "Saved to \(resolved.appName)" : "Will save to \(resolved.appName)")
                         .font(.observed(11, weight: .medium))
                         .foregroundStyle(.white)
                 }
@@ -676,6 +676,11 @@ struct QuickCaptureView: View {
             // may still be in flight — planning against the database before it
             // lands would file the note on the app you just left.
             await model.recorder.settled()
+
+            guard !model.isDeletingAllData else {
+                saveError = "FlowTrace is deleting its data. Your words are still here; try again when it finishes."
+                return
+            }
 
             do {
                 // The load-time span can be seconds stale, and which tab you are

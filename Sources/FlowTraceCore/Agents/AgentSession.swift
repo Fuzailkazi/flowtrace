@@ -150,11 +150,30 @@ public protocol AgentAdapter: Sendable {
     /// Whether those directories exist on this machine.
     var isAvailable: Bool { get }
     func discoverSessions(cache: SessionCache?) throws -> [AgentSession]
+    func discoverSessionsWithDiagnostics(cache: SessionCache?) throws -> AgentDiscovery
+}
+
+public struct AgentDiscovery: Sendable {
+    public var sessions: [AgentSession]
+    /// Candidate JSONL files that could not yield a usable session. This may
+    /// include empty or unsupported files as well as read errors.
+    public var skippedFiles: Int
+    public var skippedDirectories: Int
+
+    public init(sessions: [AgentSession], skippedFiles: Int = 0, skippedDirectories: Int = 0) {
+        self.sessions = sessions
+        self.skippedFiles = skippedFiles
+        self.skippedDirectories = skippedDirectories
+    }
 }
 
 public extension AgentAdapter {
     var isAvailable: Bool {
         searchPaths.contains { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    func discoverSessionsWithDiagnostics(cache: SessionCache?) throws -> AgentDiscovery {
+        AgentDiscovery(sessions: try discoverSessions(cache: cache))
     }
 }
 

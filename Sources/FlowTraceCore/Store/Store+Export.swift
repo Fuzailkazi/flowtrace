@@ -97,6 +97,12 @@ extension Store {
     /// were silently left behind by a button labelled "Delete all data". A list
     /// that has to be remembered is a list that will be forgotten.
     public func deleteAllData() throws {
+        // `DELETE` alone removes rows logically but can leave their old bytes
+        // in free pages. Enable scrubbing before the deletes, including FTS
+        // shadow-table writes, then rebuild and truncate the WAL afterward.
+        try database.writer.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA secure_delete = ON")
+        }
         try database.writer.write { db in
             for table in try Self.userTables(db) {
                 try db.execute(sql: "DELETE FROM \(table)")
@@ -106,6 +112,10 @@ extension Store {
             // shadow tables, and rightly — deleting from them directly errors —
             // so the virtual table is emptied through its own name.
             try db.execute(sql: "DELETE FROM searchIndex")
+        }
+        try database.writer.vacuum()
+        _ = try database.writer.writeWithoutTransaction { db in
+            try db.checkpoint(.truncate)
         }
         // A log of what the app did with your data is part of what "delete
         // everything" has to mean.

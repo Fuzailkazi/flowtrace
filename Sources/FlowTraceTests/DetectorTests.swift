@@ -91,6 +91,26 @@ struct StubAdapter: AgentAdapter {
     func discoverSessions(cache: SessionCache?) throws -> [AgentSession] { sessions }
 }
 
+private struct FailingAdapter: AgentAdapter {
+    let agent: AgentName
+    var searchPaths: [String] { ["/unreadable"] }
+    var isAvailable: Bool { true }
+    func discoverSessions(cache: SessionCache?) throws -> [AgentSession] {
+        throw CocoaError(.fileReadNoPermission)
+    }
+}
+
+private struct SkippingAdapter: AgentAdapter {
+    let agent: AgentName = .claudeCode
+    let sessions: [AgentSession]
+    var searchPaths: [String] { [] }
+    var isAvailable: Bool { true }
+    func discoverSessions(cache: SessionCache?) throws -> [AgentSession] { sessions }
+    func discoverSessionsWithDiagnostics(cache: SessionCache?) throws -> AgentDiscovery {
+        AgentDiscovery(sessions: sessions, skippedFiles: 2)
+    }
+}
+
 private func session(
     id: String = UUID().uuidString,
     agent: AgentName = .claudeCode,
@@ -105,12 +125,49 @@ private func session(
         firstPrompt: first, lastPrompt: last, lastSubstantivePrompt: last,
         startedAt: Date().addingTimeInterval(-Double(daysAgo) * 86_400),
         lastActivityAt: Date().addingTimeInterval(-Double(daysAgo) * 86_400),
+        lastHumanActivityAt: Date().addingTimeInterval(-Double(daysAgo) * 86_400),
         filePath: "/dev/null", messageCount: 2
     )
 }
 
 func runDetectorTests() {
     TestKit.suite("Detector — what counts as abandoned")
+
+    TestKit.test("a failed source makes a scan partial rather than silently empty") {
+        let repo = try TempRepo(name: "partial-scan")
+        repo.write("README.md", "hello"); repo.commit("initial", daysAgo: 1)
+        let detector = AbandonedWorkDetector(adapters: [
+            FailingAdapter(agent: .claudeCode),
+            StubAdapter(agent: .codex, sessions: [session(agent: .codex, cwd: repo.path, daysAgo: 1)]),
+        ])
+        let result = try detector.scan(config: testConfig())
+        expectEqual(result.sourcesRead, 1)
+        expectEqual(result.sourceFailures.count, 1)
+        expectContains(result.sourceFailures[0], "Claude Code")
+        expectEqual(result.recentPlaces.count, 1, "readable source still contributes a place")
+    }
+
+    TestKit.test("an unreadable only source is reported as an unreadable source") {
+        let result = try AbandonedWorkDetector(adapters: [
+            FailingAdapter(agent: .claudeCode)
+        ]).scan(config: testConfig())
+        expectEqual(result.sourcesRead, 0)
+        expectEqual(result.sourceFailures.count, 1)
+        expectEqual(result.sessionsScanned, 0)
+    }
+
+    TestKit.test("skipped candidate files are reported without discarding good sessions") {
+        let repo = try TempRepo(name: "skipped-scan")
+        repo.write("README.md", "hello"); repo.commit("initial", daysAgo: 1)
+        let result = try AbandonedWorkDetector(adapters: [
+            SkippingAdapter(sessions: [session(cwd: repo.path, daysAgo: 1)])
+        ]).scan(config: testConfig())
+        expectEqual(result.sourcesRead, 1)
+        expect(result.sourceFailures.isEmpty)
+        expectEqual(result.sourceWarnings.count, 1)
+        expectContains(result.sourceWarnings[0], "2 candidate session files")
+        expectEqual(result.recentPlaces.count, 1)
+    }
 
     TestKit.test("dirty and cold is proposed, with its evidence attached") {
         let repo = try TempRepo(name: "acme")
@@ -148,6 +205,54 @@ func runDetectorTests() {
             StubAdapter(agent: .claudeCode, sessions: [session(cwd: repo.path, daysAgo: 200)]),
         ])
         expectEqual(try detector.scan(config: testConfig()).proposals.count, 0, "proposals")
+    }
+
+    TestKit.test("a recent clean repository can still be browsed from agent history") {
+        let repo = try TempRepo(name: "clean-recovery")
+        repo.write("README.md", "hello")
+        repo.commit("initial", daysAgo: 1)
+        let web = try repo.subdirectory("web")
+
+        let detector = AbandonedWorkDetector(adapters: [
+            StubAdapter(agent: .claudeCode, sessions: [
+                session(cwd: repo.path, title: "Older task", daysAgo: 8),
+                session(cwd: web, title: "Webhook retry decision", daysAgo: 1),
+            ]),
+        ])
+        let result = try detector.scan(config: testConfig())
+        expect(result.proposals.isEmpty, "clean work is not called unfinished")
+        expectEqual(result.recentPlaces.count, 1, "subfolders share one browsable place")
+        expectEqual(result.recentPlaces.first?.path, FilePathCanon.canonical(repo.path))
+        expectEqual(result.recentPlaces.first?.title, "Webhook retry decision")
+    }
+
+    TestKit.test("old and ignored repositories do not fill the recent browse list") {
+        let old = try TempRepo(name: "old-browse")
+        old.write("README.md", "hello"); old.commit("initial", daysAgo: 50)
+        let ignored = try TempRepo(name: "ignored-browse")
+        ignored.write("README.md", "hello"); ignored.commit("initial", daysAgo: 1)
+        let detector = AbandonedWorkDetector(
+            adapters: [StubAdapter(agent: .codex, sessions: [
+                session(cwd: old.path, daysAgo: 50),
+                session(cwd: ignored.path, daysAgo: 1),
+            ])],
+            ignoredPaths: [ignored.path]
+        )
+        expect(try detector.scan(config: testConfig()).recentPlaces.isEmpty)
+    }
+
+    TestKit.test("agent-only updates are not shown as a place you recently visited") {
+        let repo = try TempRepo(name: "scheduled-browse")
+        repo.write("README.md", "hello"); repo.commit("initial", daysAgo: 1)
+        let machineOnly = AgentSession(
+            id: "scheduled", agent: .codex, cwd: repo.path,
+            title: "Background refresh", lastActivityAt: Date(),
+            filePath: "/dev/null", messageCount: 0
+        )
+        let detector = AbandonedWorkDetector(adapters: [
+            StubAdapter(agent: .codex, sessions: [machineOnly])
+        ])
+        expect(try detector.scan(config: testConfig()).recentPlaces.isEmpty)
     }
 
     TestKit.test("work touched today is not abandoned yet") {

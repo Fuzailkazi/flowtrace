@@ -7,14 +7,25 @@ set -euo pipefail
 
 CONFIG="${1:-release}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST="$ROOT/dist"
+DIST="${FLOWTRACE_DIST_DIR:-$ROOT/dist}"
 APP="$DIST/FlowTrace.app"
 BUNDLE_ID="ai.flowtrace.FlowTrace"
-VERSION="0.1.0"
+VERSION="${FLOWTRACE_VERSION:-0.1.0}"
+BUILD_NUMBER="${FLOWTRACE_BUILD_NUMBER:-1}"
 
-# Set FLOWTRACE_SIGN_IDENTITY to a Developer ID to produce a distributable
-# build; without it the app is ad-hoc signed, which is fine on this machine but
-# will be quarantined on anyone else's.
+# These values are embedded in XML and used in an archive filename. Reject
+# unsafe or invalid input before building or replacing an existing bundle.
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "FLOWTRACE_VERSION must be a numeric version such as 0.1.1." >&2
+    exit 2
+fi
+if ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+    echo "FLOWTRACE_BUILD_NUMBER must be a positive integer." >&2
+    exit 2
+fi
+
+# Set FLOWTRACE_SIGN_IDENTITY to a Developer ID for a build eligible for
+# notarization. Signing alone is not the finished public distribution step.
 SIGN_IDENTITY="${FLOWTRACE_SIGN_IDENTITY:--}"
 
 echo "▸ Building ($CONFIG)…"
@@ -25,6 +36,7 @@ swift build -c "$CONFIG" --product flowtrace
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
 echo "▸ Assembling bundle…"
+mkdir -p "$DIST"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -52,13 +64,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticTermination</key><false/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>FlowTrace reads the titles and URLs of the tabs in your browser's front window while recording, to show what you were reading. It never reads page contents, cookies or form data.</string>
+    <string>After you connect a browser, FlowTrace reads tab titles and URLs in its front window to show what you were reading. It never reads page contents, cookies or form data.</string>
     <key>NSAppleScriptEnabled</key><false/>
 </dict>
 </plist>
@@ -67,17 +79,28 @@ PLIST
 cat > "$APP/Contents/PkgInfo" <<< "APPL????"
 
 echo "▸ Signing (identity: $SIGN_IDENTITY)…"
-codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$APP" 2>/dev/null
-
 if [ "$SIGN_IDENTITY" = "-" ]; then
+    codesign --force --sign - --timestamp=none "$APP" 2>/dev/null
     echo "  ad-hoc signed — macOS may re-ask for Automation permission after each rebuild"
+else
+    codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp "$APP"
+    echo "  Developer ID signed — notarize the release archive before public distribution"
 fi
+
+echo "▸ Verifying bundle…"
+plutil -lint "$APP/Contents/Info.plist"
+codesign --verify --deep --strict --verbose=2 "$APP"
+test -s "$APP/Contents/Resources/AppIcon.icns"
 
 echo "✓ $APP"
 echo "✓ $DIST/flowtrace"
 
 if [ "$CONFIG" = "release" ]; then
-    ARCHIVE="$DIST/FlowTrace-$VERSION-macOS.zip"
+    ARCHIVE_NAME="FlowTrace-$VERSION-macOS.zip"
+    if [ "$BUILD_NUMBER" != "1" ]; then
+        ARCHIVE_NAME="FlowTrace-$VERSION-build$BUILD_NUMBER-macOS.zip"
+    fi
+    ARCHIVE="$DIST/$ARCHIVE_NAME"
     rm -f "$ARCHIVE"
     ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
     echo "✓ $ARCHIVE"

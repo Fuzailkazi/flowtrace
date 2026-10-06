@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var counts: [String: Int] = [:]
     @State private var confirmingDeleteAll = false
+    @State private var deletingAll = false
     @State private var ignored: [String] = []
     @State private var accessibilityGranted = AccessibilityPermission.isGranted
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
@@ -37,6 +38,7 @@ struct SettingsView: View {
             }
             .padding(Theme.Space.xl)
         }
+        .disabled(deletingAll)
         .navigationTitle("Settings")
         .task {
             reload()
@@ -68,8 +70,11 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Everything: your notes, every recorded app and page, every project "
-                 + "note, every thread. This cannot be undone. Your own files are not "
-                 + "touched.")
+                 + "note, every thread. Automatic recording, agent sources, and the local "
+                 + "capture server will turn off. The extension token will be removed, "
+                 + "so you must pair it again if you turn the server back on. "
+                 + "This cannot be undone. Your own files "
+                 + "are not touched.")
         }
     }
 
@@ -135,6 +140,7 @@ struct SettingsView: View {
                     .disabled(!available)
                     .onChange(of: isOn.wrappedValue) { _, _ in
                         model.consent.save()
+                        model.sourceConsentChanged()
                         model.refresh()
                     }
                 VStack(alignment: .leading, spacing: 2) {
@@ -162,6 +168,7 @@ struct SettingsView: View {
                     .disabled(!adapter.isAvailable)
                     .onChange(of: isOn.wrappedValue) { _, _ in
                         model.consent.save()
+                        model.sourceConsentChanged()
                         model.refresh()
                     }
                 VStack(alignment: .leading, spacing: 2) {
@@ -783,13 +790,15 @@ struct SettingsView: View {
                         Button("Delete everything…", role: .destructive) {
                             confirmingDeleteAll = true
                         }
+                        .disabled(deletingAll)
+                        if deletingAll { ProgressView().controlSize(.small) }
                     }
                     .controlSize(.small)
 
                     Divider()
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("It all lives in one file. You can delete it yourself.")
+                        Text("Your saved activity and notes live in a local database. The controls above also clear FlowTrace's log and server token.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                         HStack(spacing: Theme.Space.s) {
                             Text(FlowTraceDatabase.defaultURL.path)
@@ -910,14 +919,18 @@ struct SettingsView: View {
     }
 
     private func deleteAll() {
-        do {
-            try model.store.deleteAllData()
-            model.refresh()
-            reload()
-            model.route = .dashboard
-            model.toast = Toast(message: "All FlowTrace data deleted")
-        } catch {
-            model.toast = Toast(message: error.localizedDescription, isError: true)
+        guard !deletingAll else { return }
+        deletingAll = true
+        Task {
+            defer { deletingAll = false }
+            do {
+                try await model.deleteAllStoredData()
+                reload()
+                model.route = .dashboard
+                model.toast = Toast(message: "All FlowTrace data deleted; automatic collection is off")
+            } catch {
+                model.toast = Toast(message: error.localizedDescription, isError: true)
+            }
         }
     }
 

@@ -73,6 +73,7 @@ final class QuickCaptureController {
 
     /// Snapshots where the user is, then shows the panel over it.
     func toggle() {
+        guard !model.isDeletingAllData else { return }
         Diagnostics.log("quick-capture toggle (visible: \(panel?.isVisible ?? false))")
         if let panel, panel.isVisible {
             dismiss()

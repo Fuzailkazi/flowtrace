@@ -162,6 +162,95 @@ func runBriefTests() {
         expectContains(brief.render(), "refresh.ts")
     }
 
+    TestKit.test("an OpenCode title can recover clean work when that source is allowed") {
+        let repo = try TempRepo(name: "opencode-recall")
+        repo.write("src/auth.ts", "done")
+        repo.commit("start auth", daysAgo: 7)
+
+        let database = URL(fileURLWithPath: repo.path + "-opencode.db")
+        let updated = Int64(Date().addingTimeInterval(-86_400).timeIntervalSince1970 * 1_000)
+        let sql = """
+            CREATE TABLE session (
+              id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT NOT NULL,
+              time_updated INTEGER NOT NULL, time_archived INTEGER
+            );
+            INSERT INTO session VALUES
+              ('ses_recent','\(repo.path)','finish the auth redirect',\(updated),NULL);
+            """
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = [database.path, sql]
+        try process.run()
+        process.waitUntilExit()
+        expectEqual(process.terminationStatus, 0)
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let reader = BriefBuilder(openCodeDatabase: database)
+        let brief = try unwrap(reader.build(
+            repositoryPath: repo.path, sources: .openCode, config: config
+        ))
+        expectEqual(brief.sessionTitle, "finish the auth redirect")
+        expect(brief.recentPrompts.isEmpty, "a title is not a user prompt")
+        expectContains(brief.render(), "finish the auth redirect")
+        expectNil(reader.build(repositoryPath: repo.path, sources: .none, config: config),
+                  "disabling OpenCode must not read its title")
+
+        let stale = Int64(Date().addingTimeInterval(-400 * 86_400).timeIntervalSince1970 * 1_000)
+        let update = Process()
+        update.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        update.arguments = [database.path, "UPDATE session SET time_updated = \(stale);"]
+        try update.run()
+        update.waitUntilExit()
+        expectEqual(update.terminationStatus, 0)
+        expectNil(reader.build(repositoryPath: repo.path, sources: .openCode, config: config),
+                  "a recent Git commit must not make an old session title current")
+    }
+
+    TestKit.test("an older session title cannot outrank a newer instruction") {
+        let repo = try TempRepo(name: "latest-session")
+        repo.write("src/work.ts", "started")
+        repo.commit("start work", daysAgo: 8)
+        repo.write("src/work.ts", "unfinished")
+
+        let root = repo.root.deletingLastPathComponent().appendingPathComponent("claude-fixture")
+        let directory = root.appendingPathComponent(ClaudeCodeAdapter.projectSlug(for: repo.path))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let formatter = ISO8601DateFormatter()
+        func writeSession(_ file: String, daysAgo: Int, title: String?, prompt: String) throws {
+            let timestamp = formatter.string(from: Date().addingTimeInterval(-Double(daysAgo) * 86_400))
+            var lines: [[String: Any]] = []
+            if let title {
+                lines.append(["type": "ai-title", "aiTitle": title, "cwd": repo.path,
+                              "timestamp": timestamp])
+            }
+            lines.append(["type": "user", "cwd": repo.path, "timestamp": timestamp,
+                          "message": ["content": prompt]])
+            let text = try lines.map {
+                String(data: try JSONSerialization.data(withJSONObject: $0), encoding: .utf8)!
+            }.joined(separator: "\n") + "\n"
+            try text.write(to: directory.appendingPathComponent(file + ".jsonl"),
+                           atomically: true, encoding: .utf8)
+        }
+        try writeSession("older", daysAgo: 5, title: "Refactor the legacy billing flow",
+                         prompt: "Refactor the legacy billing flow before we move on")
+        try writeSession("newer", daysAgo: 1, title: nil,
+                         prompt: "Finish the webhook retry behavior and add failure handling")
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let builder = BriefBuilder(claude: ClaudeCodeAdapter(root: root))
+        let brief = try unwrap(builder.build(
+            repositoryPath: repo.path, sources: .claudeCode, config: config
+        ))
+        expectNil(brief.sessionTitle, "the latest session has no title")
+        expectEqual(brief.recentPrompts.last,
+                    "Finish the webhook retry behavior and add failure handling")
+        let recall = PlaceRecall(path: repo.path, name: repo.root.lastPathComponent, brief: brief)
+        expectEqual(recall.intent?.text,
+                    "Finish the webhook retry behavior and add failure handling")
+    }
+
     TestKit.test("a repository's own slug never swallows a longer neighbour") {
         // ~/armor/vid must not match ~/armor/videos.
         let short = ClaudeCodeAdapter.projectSlug(for: "/Users/dev/armor/vid")

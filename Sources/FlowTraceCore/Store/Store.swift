@@ -217,4 +217,8 @@ public final class Store {
     public func search(_ query: String, limit: Int = 50) throws -> [SearchHit] {
         try writer.read { db in try SearchIndex.search(db, query: query, limit: limit) }
     }
+
+    public func searchMemories(_ query: String, limit: Int = 200) throws -> [SearchHit] {
+        try writer.read { db in try SearchIndex.searchMemories(db, query: query, limit: limit) }
+    }
 }
