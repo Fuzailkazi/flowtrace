@@ -141,6 +141,13 @@ func runActivityTests() {
         expectEqual(e.durationLabel, "under a minute")
     }
 
+    TestKit.test("a just-written open span never has negative duration") {
+        let started = Date().addingTimeInterval(0.5)
+        let event = ActivityEvent(kind: .app, startedAt: started, appName: "Code")
+        expectEqual(event.duration, 0)
+        expectEqual(event.durationLabel, "still open")
+    }
+
     TestKit.suite("Spans left open")
 
     // A crash, a force-quit, or the old capture bug leaves `endedAt` nil. Left
@@ -270,7 +277,7 @@ func runActivityTests() {
             metadata: ["tabsOpen": "11"]
         ))
         try store.describeActivity(id: event.id, metadata: ["place": "flowtrace"])
-        let after = try unwrap(try store.allActivity(on: event.startedAt, minimumSeconds: 0).first)
+        let after = try unwrap(try store.activity(id: event.id))
         expectEqual(after.metadata["tabsOpen"], "11", "existing key survived")
         expectEqual(after.metadata["place"], "flowtrace")
     }
@@ -284,7 +291,7 @@ func runActivityTests() {
             metadata: ["place": "old-project", "cwd": "/tmp/old", "tabsOpen": "2"]
         ))
         try store.describeActivity(id: event.id, metadata: ["place": nil, "cwd": nil])
-        let after = try unwrap(try store.allActivity(on: event.startedAt, minimumSeconds: 0).first)
+        let after = try unwrap(try store.activity(id: event.id))
         expectNil(after.metadata["place"])
         expectNil(after.metadata["cwd"])
         expectEqual(after.metadata["tabsOpen"], "2", "unrelated key survived")

@@ -93,7 +93,11 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
     }
 
     public var duration: TimeInterval {
-        (endedAt ?? Date()).timeIntervalSince(startedAt)
+        // A just-written open span can round a fraction of a second ahead of
+        // the wall clock when read back from SQLite. It still has zero elapsed
+        // time, rather than a negative duration that can hide it at a 0-second
+        // threshold.
+        max(0, (endedAt ?? Date()).timeIntervalSince(startedAt))
     }
 
     public var isOpen: Bool { endedAt == nil }
