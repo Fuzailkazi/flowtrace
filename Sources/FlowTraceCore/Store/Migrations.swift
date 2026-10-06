@@ -220,6 +220,13 @@ enum Migrations {
             try MemoryIndexing.indexEverything(db)
         }
 
+        // v7 covered notes that existed at upgrade time, but closed Quick
+        // Capture points written afterward bypassed the index. Repair that
+        // interval before the corrected recordActivity path takes over.
+        migrator.registerMigration("v8.indexCapturePoints") { db in
+            try MemoryIndexing.indexEverything(db)
+        }
+
         return migrator
     }
 }

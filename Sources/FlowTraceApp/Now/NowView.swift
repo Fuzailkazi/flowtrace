@@ -25,6 +25,7 @@ struct NowView: View {
     @State private var browsers: [LiveBrowser] = []
     @State private var tabNotes: [String: String] = [:]
     @State private var backgroundExpanded = false
+    @State private var hasOpenedBackground = false
     @State private var stopCandidate: LiveServer?
     /// A store read that failed. Kept on screen until a later read succeeds:
     /// "nothing is running" and "I couldn't look" must not render alike.
@@ -43,6 +44,8 @@ struct NowView: View {
 
     private var agentCount: Int { projects.reduce(0) { $0 + $1.agents.count } }
     private var serverCount: Int { projects.reduce(0) { $0 + $1.servers.count } }
+    private var backgroundAgentCount: Int { attention.background.reduce(0) { $0 + $1.agents.count } }
+    private var backgroundServerCount: Int { attention.background.reduce(0) { $0 + $1.servers.count } }
     private var anyoneWorking: Bool { state.agents.contains { $0.state == .working } }
 
     private var attention: AttentionSections { AttentionRanker().rank(projects) }
@@ -51,6 +54,9 @@ struct NowView: View {
     /// first entry is the place that is moving — or, if nothing is, the place
     /// that moved last.
     private var spotlight: LiveProject? { attention.continueWork.first }
+    private var hasPastWorkAction: Bool {
+        model.canScanPastSessions || !model.proposals.isEmpty
+    }
     private var recentProjects: [LiveProject] {
         Array(attention.continueWork.dropFirst()) + attention.recent
     }
@@ -87,15 +93,23 @@ struct NowView: View {
                     if let spotlight {
                         spotlightCard(spotlight)
                     } else if failure == nil {
-                        empty
+                        if projects.isEmpty && hasPastWorkAction {
+                            pastWork
+                        } else {
+                            empty
+                        }
                     }
 
                     if !recentProjects.isEmpty {
                         recently
                     }
 
-                    if !projects.isEmpty {
+                    if !attention.background.isEmpty {
                         runningInBackground
+                    }
+
+                    if hasPastWorkAction && !projects.isEmpty {
+                        pastWork
                     }
 
                     // Tabs are evidence about the work even when no agents or
@@ -114,6 +128,7 @@ struct NowView: View {
                             onNote: { tab, text in noteTab(tab, text) }
                         )
                     }
+
                 }
 
                 footer
@@ -207,7 +222,7 @@ struct NowView: View {
                 pillIcon("globe", tint: Journal.inkSoft)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(projects.count) thing\(projects.count == 1 ? "" : "s") in the background")
+                Text("\(projects.count) place\(projects.count == 1 ? "" : "s") open on this Mac")
                     .font(.observed(11, weight: .medium))
                     .foregroundStyle(Journal.ink)
                 Text("\(nowCount(agentCount, "coding session")) · \(nowCount(serverCount, "local server"))")
@@ -350,37 +365,32 @@ struct NowView: View {
     private func threadStrip(_ project: LiveProject) -> some View {
         let canonical = FilePathCanon.canonical(project.path)
         let building = notes[canonical]?.building ?? ""
+        let nextStep = notes[canonical]?.nextStep ?? ""
 
         VStack(alignment: .leading, spacing: Journal.Space.s) {
-            HStack(spacing: Journal.Space.l) {
-                Text("Current workspace thread")
-                    .font(.observed(11, weight: .medium))
-                    .foregroundStyle(Journal.inkSoft)
-                    .layoutPriority(1)
-
-                if let prompt = project.lastPrompt {
-                    HStack(spacing: 6) {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Journal.pen)
-                        Text(oneLine(prompt))
-                            .font(.mono(12))
-                            .foregroundStyle(Journal.ink)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                } else if building.isEmpty && editing != canonical {
-                    invitation(project)
-                }
-            }
+            Text("Context for this place")
+                .font(.observed(11, weight: .medium))
+                .foregroundStyle(Journal.inkSoft)
 
             if editing == canonical {
                 noteEditor(project)
             } else if !building.isEmpty {
-                Text("“\(building)”")
-                    .font(.yourWords(15))
-                .foregroundStyle(Journal.ink)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("YOUR NOTE")
+                        .font(.caption(9))
+                        .tracking(0.8)
+                        .foregroundStyle(Journal.inkSoft)
+                    Text("“\(building)”")
+                        .font(.yourWords(15))
+                        .foregroundStyle(Journal.ink)
+                }
                 .onTapGesture { begin(path: project.path, existing: building) }
+            } else if nextStep.isEmpty && project.lastPrompt == nil {
+                invitation(project)
+            }
+
+            if editing != canonical && !nextStep.isEmpty {
+                contextLine(label: "your next step", text: nextStep)
             }
 
             if let prompt = project.lastPrompt, !prompt.isEmpty {
@@ -435,7 +445,7 @@ struct NowView: View {
                         Text("Running in the background")
                             .font(.journalTitle(15))
                             .foregroundStyle(Journal.ink)
-                        Text("\(nowCount(agentCount, "coding session")) · \(nowCount(serverCount, "local server"))")
+                        Text("\(nowCount(backgroundAgentCount, "coding session")) · \(nowCount(backgroundServerCount, "local server"))")
                             .font(.caption())
                             .foregroundStyle(Journal.inkSoft)
                     }
@@ -663,17 +673,136 @@ struct NowView: View {
 
     // MARK: - Empty and footer
 
+    /// A deliberate look backward, after the live picture. The first run no
+    /// longer makes everyone wait for a transcript scan or triage proposals
+    /// before they can see Now.
+    private var pastWork: some View {
+        VStack(alignment: .leading, spacing: Journal.Space.s) {
+            Text("From earlier sessions")
+                .font(.journalTitle(17))
+                .foregroundStyle(Journal.ink)
+
+            if !model.proposals.isEmpty {
+                Text("FlowTrace found \(nowCount(model.proposals.count, "place")) you may want to revisit in your agent history.")
+                    .font(.observed(13))
+                    .foregroundStyle(Journal.inkMid)
+                Button("Review places") { model.route = .dashboard }
+                    .buttonStyle(.link)
+            }
+
+            switch model.scanState {
+            case .running(let phase, let fraction):
+                ProgressView(value: fraction) { Text("Looking through past sessions: \(phase)") }
+                    .font(.observed(12))
+                Button("Stop scan") { model.cancelScan() }.buttonStyle(.link)
+            case .cancelling:
+                ProgressView("Stopping the scan…").controlSize(.small)
+            case .failed(let message):
+                Text("The scan didn't finish: \(message)")
+                    .font(.observed(12))
+                    .foregroundStyle(Journal.danger)
+                Button("Try again") { model.scan() }.buttonStyle(.link)
+            case .finished(let summary):
+                if !summary.sourceFailures.isEmpty {
+                    Text("Some agent histories could not be read. Results below are partial.")
+                        .font(.observed(12))
+                        .foregroundStyle(Journal.danger)
+                    ForEach(summary.sourceFailures, id: \.self) { message in
+                        Text(message).font(.caption()).foregroundStyle(Journal.inkMid)
+                    }
+                }
+                if !summary.sourceWarnings.isEmpty {
+                    Text("Some session data could not be used, so this list may be incomplete.")
+                        .font(.observed(12))
+                        .foregroundStyle(Journal.inkMid)
+                    ForEach(summary.sourceWarnings, id: \.self) { message in
+                        Text(message).font(.caption()).foregroundStyle(Journal.inkSoft)
+                    }
+                }
+                if model.recentSessionPlaces.isEmpty && model.proposals.isEmpty {
+                    Text(summary.sessions == 0
+                         ? (summary.sourceWarnings.isEmpty
+                             ? "No sessions were found in the sources that were read."
+                             : "No usable sessions surfaced from the data that could be read.")
+                         : "No recent repositories or older unfinished git work surfaced from \(nowCount(summary.sessions, "scanned session")).")
+                        .font(.observed(13))
+                        .foregroundStyle(Journal.inkMid)
+                }
+                if !model.recentSessionPlaces.isEmpty {
+                    Text("Recently visited places · from agent sessions, including clean repositories")
+                        .font(.observed(12))
+                        .foregroundStyle(Journal.inkMid)
+                        .padding(.top, Journal.Space.s)
+                    ForEach(model.recentSessionPlaces) { place in
+                        Button { model.route = .place(place.path) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: Journal.Space.s) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(place.name).font(.observed(13, weight: .medium))
+                                    Text(place.path.abbreviatingHome)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(Journal.inkSoft)
+                                        .lineLimit(1).truncationMode(.middle)
+                                    if let title = place.title {
+                                        Text(title).font(.caption()).foregroundStyle(Journal.inkMid)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                Spacer(minLength: Journal.Space.s)
+                                Text(place.agent.label).font(.caption())
+                                    .foregroundStyle(Journal.inkSoft)
+                                Text(place.updatedAt, style: .relative).font(.caption())
+                                    .foregroundStyle(Journal.inkSoft)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.vertical, 3)
+                    }
+                }
+                Button("Look again") { model.scan() }.buttonStyle(.link)
+            case .idle:
+                Text("Browse recent Claude Code and Codex places, including clean repositories. FlowTrace also checks for older uncommitted or unpushed work.")
+                    .font(.observed(13))
+                    .foregroundStyle(Journal.inkMid)
+                Button("Browse agent history") { model.scan() }
+                    .buttonStyle(.link)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .nowCard(padding: Journal.Space.l)
+    }
+
     private var empty: some View {
         VStack(alignment: .leading, spacing: Journal.Space.s) {
-            Text("Nothing recent to continue.")
+            Text(projects.isEmpty ? "Nothing running right now."
+                 : recentProjects.isEmpty ? "No recent work details yet."
+                 : "No immediate work to continue.")
                 .font(.journalTitle(19))
                 .foregroundStyle(Journal.ink)
             Text(projects.isEmpty
-                 ? "When you return to work, it will appear here. Press \(model.captureTrigger.displayString) anywhere to note why you're here."
-                 : "The things still open on your Mac are listed under Running in the background.")
+                 ? "No coding agents or local servers are running right now. Start one and it appears here. Press \(model.captureTrigger.displayString) anywhere to save a note."
+                 : recentProjects.isEmpty
+                     ? "Running sessions and servers are listed below. FlowTrace has no recent human activity to highlight for them."
+                     : "Your recent places are listed below; none has activity from the last week.")
                 .font(.observed(13.5))
                 .foregroundStyle(Journal.inkMid)
                 .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Journal.Space.m) {
+                if !model.consent.anyEnabled {
+                    Button("Choose session sources") { model.route = .settings }
+                        .buttonStyle(.borderedProminent)
+                    Button("Write a note") {
+                        NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button("Write a note") {
+                        NotificationCenter.default.post(name: .flowtraceQuickCapture, object: nil)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(.top, Journal.Space.s)
         }
         .nowCard(padding: Self.spotlightPadding)
     }
@@ -683,7 +812,7 @@ struct NowView: View {
         HStack(spacing: Journal.Space.s) {
             Image(systemName: "lock.shield")
                 .font(.system(size: 12, weight: .medium))
-            Text("Reads processes, transcripts and tab titles on this Mac. Nothing leaves it.")
+            Text("Reads running processes and the sources you enabled. Nothing leaves this Mac.")
                 .lineLimit(2)
             Spacer(minLength: Journal.Space.l)
             Text("Refreshes every 8s · tabs every 30s")
@@ -719,6 +848,12 @@ struct NowView: View {
 
     private func recomputeProjects() {
         projects = state.projects(notes: notes).filter { !ignored.contains($0.path) }
+        // Without a human turn, there is no justified spotlight. Show the
+        // process-backed places instead of opening on an empty-looking page.
+        if !hasOpenedBackground && !projects.isEmpty && spotlight == nil {
+            backgroundExpanded = true
+            hasOpenedBackground = true
+        }
         // The recovery screen reads the row the user was looking at rather than
         // taking a second census, so the two can never disagree about what is
         // running.

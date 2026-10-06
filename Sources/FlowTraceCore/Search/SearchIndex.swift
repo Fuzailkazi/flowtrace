@@ -21,6 +21,10 @@ public enum SearchKind: String, Codable, Sendable {
 }
 
 public struct SearchHit: Identifiable, Hashable, Sendable {
+    public enum MatchQuality: Hashable, Sendable {
+        case allTerms, partial, substring
+    }
+
     public var kind: SearchKind
     public var recordId: String
     /// The thread this hit belongs to — always the navigation target.
@@ -28,6 +32,9 @@ public struct SearchHit: Identifiable, Hashable, Sendable {
     public var title: String
     public var snippet: String
     public var rank: Double
+    /// A result from the broader fallback must be labelled, so the user does
+    /// not mistake one matching word for an answer to the whole question.
+    public var matchQuality: MatchQuality
 
     public var id: String { "\(kind.rawValue):\(recordId)" }
 }
@@ -38,6 +45,12 @@ public struct SearchHit: Identifiable, Hashable, Sendable {
 /// sync is explicit, so the app and the CLI share a single code path and the
 /// behaviour is directly testable.
 public enum SearchIndex {
+    private static let fillerWords: Set<String> = [
+        "a", "an", "and", "are", "at", "did", "do", "for", "from", "i",
+        "in", "is", "it", "me", "my", "of", "on", "or", "that", "the",
+        "this", "to", "was", "were", "what", "when", "where", "with",
+    ]
+
     static func index(
         _ db: Database,
         kind: SearchKind,
@@ -66,28 +79,73 @@ public enum SearchIndex {
 
     // MARK: - Query
 
-    /// Turn whatever the user typed into a valid FTS5 MATCH expression.
-    ///
-    /// Every token is quoted (so `blocked:` or `C++` can't be read as syntax) and
-    /// given a prefix wildcard, which is what makes partial words like "auth" find
-    /// "authentication".
-    static func ftsExpression(for raw: String) -> String? {
-        let tokens = raw
+    /// Filler words in a spoken question should not prevent its actual subject
+    /// from being found. If every word is filler, keep the original terms.
+    private static func searchTerms(in raw: String) -> [String] {
+        let words = raw
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
-        guard !tokens.isEmpty else { return nil }
-        return tokens.map { "\"\($0)\"*" }.joined(separator: " AND ")
+        let meaningful = words.filter { !fillerWords.contains($0.lowercased()) }
+        var seen = Set<String>()
+        return (meaningful.isEmpty ? words : meaningful).filter {
+            seen.insert($0.lowercased()).inserted
+        }
+    }
+
+    private static func ftsExpression(tokens: [String], joiningWith separator: String) -> String {
+        // Quote each token so punctuation and search operators are never syntax.
+        tokens.map { "\"\($0)\"*" }.joined(separator: separator)
     }
 
     public static func search(_ db: Database, query: String, limit: Int = 50) throws -> [SearchHit] {
-        guard let expression = ftsExpression(for: query) else { return [] }
+        try search(db, query: query, limit: limit, onlyMemories: false)
+    }
 
+    /// The Memories screen has its own result budget. Legacy thread and tab
+    /// records cannot crowd a matching personal note out of that budget.
+    public static func searchMemories(_ db: Database, query: String, limit: Int = 200) throws -> [SearchHit] {
+        try search(db, query: query, limit: limit, onlyMemories: true)
+    }
+
+    private static func search(
+        _ db: Database, query: String, limit: Int, onlyMemories: Bool
+    ) throws -> [SearchHit] {
+        let terms = searchTerms(in: query)
+        guard !terms.isEmpty else { return [] }
+        let scope = onlyMemories ? "AND kind IN ('memory', 'place')" : ""
+
+        let complete = try rankedMatches(
+            db, expression: ftsExpression(tokens: terms, joiningWith: " AND "),
+            scope: scope, limit: limit, quality: .allTerms
+        )
+        if !complete.isEmpty { return complete }
+
+        // A real person often adds a remembered detail that was never saved.
+        // Return something useful, but mark it as a partial answer in the UI.
+        if terms.count > 1 {
+            let partial = try rankedMatches(
+                db, expression: ftsExpression(tokens: terms, joiningWith: " OR "),
+                scope: scope, limit: limit, quality: .partial
+            )
+            if !partial.isEmpty { return partial }
+        }
+
+        // A prefix match can still miss a substring inside one word ("code"
+        // inside "OpenCode"). Try the literal phrase as a last resort.
+        return try substringFallback(db, query: query, limit: limit, onlyMemories: onlyMemories)
+    }
+
+    private static func rankedMatches(
+        _ db: Database, expression: String, scope: String, limit: Int,
+        quality: SearchHit.MatchQuality
+    ) throws -> [SearchHit] {
         let rows = try Row.fetchAll(db, sql: """
             SELECT kind, recordId, threadId, title,
                    snippet(searchIndex, 4, '', '', '…', 14) AS snippet,
                    bm25(searchIndex, 0.0, 0.0, 0.0, 8.0, 2.0) AS rank
             FROM searchIndex
             WHERE searchIndex MATCH ?
+            \(scope)
             ORDER BY rank
             LIMIT ?
             """, arguments: [expression, limit])
@@ -100,26 +158,25 @@ public enum SearchIndex {
                 threadId: row["threadId"],
                 title: row["title"],
                 snippet: row["snippet"] ?? "",
-                rank: row["rank"] ?? 0
+                rank: row["rank"] ?? 0,
+                matchQuality: quality
             )
-        }
-
-        // A prefix match can still miss a substring in the middle of a word
-        // ("code" inside "OpenCode"). Fall back rather than showing nothing.
-        if hits.isEmpty {
-            return try substringFallback(db, query: query, limit: limit)
         }
         return hits
     }
 
-    private static func substringFallback(_ db: Database, query: String, limit: Int) throws -> [SearchHit] {
-        let pattern = "%\(query.trimmingCharacters(in: .whitespaces))%"
+    private static func substringFallback(
+        _ db: Database, query: String, limit: Int, onlyMemories: Bool
+    ) throws -> [SearchHit] {
+        let literal = query.trimmingCharacters(in: .whitespaces)
+        let scope = onlyMemories ? "AND kind IN ('memory', 'place')" : ""
         let rows = try Row.fetchAll(db, sql: """
             SELECT kind, recordId, threadId, title, body
             FROM searchIndex
-            WHERE title LIKE ? OR body LIKE ?
+            WHERE (instr(lower(title), lower(?)) > 0 OR instr(lower(body), lower(?)) > 0)
+            \(scope)
             LIMIT ?
-            """, arguments: [pattern, pattern, limit])
+            """, arguments: [literal, literal, limit])
 
         return rows.compactMap { row -> SearchHit? in
             guard let kind = SearchKind(rawValue: row["kind"]) else { return nil }
@@ -130,7 +187,8 @@ public enum SearchIndex {
                 threadId: row["threadId"],
                 title: row["title"],
                 snippet: String(body.prefix(140)),
-                rank: 100
+                rank: 100,
+                matchQuality: .substring
             )
         }
     }

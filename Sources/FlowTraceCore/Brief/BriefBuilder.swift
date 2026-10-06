@@ -23,15 +23,18 @@ public struct BriefBuilder: Sendable {
     private let git: GitProbe
     private let claude: ClaudeCodeAdapter
     private let codex: CodexAdapter
+    private let openCodeDatabase: URL
 
     public init(
         git: GitProbe = GitProbe(),
         claude: ClaudeCodeAdapter = ClaudeCodeAdapter(),
-        codex: CodexAdapter = CodexAdapter()
+        codex: CodexAdapter = CodexAdapter(),
+        openCodeDatabase: URL = OpenCodeStore.defaultDatabase
     ) {
         self.git = git
         self.claude = claude
         self.codex = codex
+        self.openCodeDatabase = openCodeDatabase
     }
 
     /// Returns nil when there is nothing worth saying — see the silence rules in
@@ -47,7 +50,8 @@ public struct BriefBuilder: Sendable {
         repositoryPath: String,
         sources: AgentSources = .all,
         config: BriefConfig = BriefConfig(),
-        cache: SessionCache? = nil
+        cache: SessionCache? = nil,
+        onReadFailure: ((String) -> Void)? = nil
     ) -> ResumeBrief? {
         guard let state = git.probe(repositoryPath) else { return nil }
 
@@ -56,7 +60,8 @@ public struct BriefBuilder: Sendable {
         else { return nil }
 
         let sessions = recentSessions(
-            for: state.topLevel, sources: sources, config: config, cache: cache
+            for: state.topLevel, sources: sources, config: config, cache: cache,
+            onReadFailure: onReadFailure
         )
         // A commit is something a person did, so `headDate` counts as human
         // evidence; a session's `lastActivityAt` does not, because it moves
@@ -89,10 +94,17 @@ public struct BriefBuilder: Sendable {
         guard hasLooseEnds || !sessions.isEmpty else { return nil }
 
         let (prompts, redactions) = promptArc(from: sessions, limit: config.maxPrompts)
+        // A title belongs to a session, not the repository. If the newest
+        // session has no title, an older title would mislabel its newer prompt
+        // as a different piece of work on the recovery screen.
+        let sessionTitle = sessions.last.flatMap { session -> String? in
+            guard let title = session.title, !title.isEmpty else { return nil }
+            return title
+        }
 
-        // A brief with no state and no recallable prompts is just a repository
-        // name and a date. Not worth a single token of the user's context.
-        guard hasLooseEnds || !prompts.isEmpty else { return nil }
+        // OpenCode supplies a redacted session title rather than user prompts.
+        // That title is still useful recall even when the working tree is clean.
+        guard hasLooseEnds || !prompts.isEmpty || sessionTitle != nil else { return nil }
 
         return ResumeBrief(
             repositoryName: state.repositoryName,
@@ -105,7 +117,7 @@ public struct BriefBuilder: Sendable {
             unpushedCount: state.commitsAhead,
             lastCommitSubject: state.lastCommitSubject,
             recentPrompts: prompts,
-            sessionTitle: sessions.last(where: { !($0.title ?? "").isEmpty })?.title,
+            sessionTitle: sessionTitle,
             redactionCount: redactions,
             elapsedIsHuman: humanActivity != nil
         )
@@ -119,27 +131,73 @@ public struct BriefBuilder: Sendable {
     /// check is what makes the result correct, since a slug can collide.
     private func recentSessions(
         for repositoryPath: String, sources: AgentSources,
-        config: BriefConfig, cache: SessionCache?
+        config: BriefConfig, cache: SessionCache?,
+        onReadFailure: ((String) -> Void)?
     ) -> [AgentSession] {
         var found: [AgentSession] = []
 
-        if sources.allows(.claudeCode), claude.isAvailable,
-           let scoped = try? claude.discoverSessions(inRepository: repositoryPath, cache: cache) {
-            found.append(contentsOf: scoped)
+        if sources.allows(.claudeCode) {
+            if claude.isAvailable {
+                do {
+                    found.append(contentsOf: try claude.discoverSessions(
+                        inRepository: repositoryPath, cache: cache
+                    ))
+                } catch {
+                    onReadFailure?("Claude Code: \(error.localizedDescription)")
+                }
+            } else {
+                onReadFailure?("Claude Code: session files are not available")
+            }
         }
-        if sources.allows(.codex), codex.isAvailable,
-           let recent = try? codex.discoverSessions(
-               modifiedWithin: config.codexLookbackDays, cache: cache
-           ) {
-            found.append(contentsOf: recent.filter { session in
-                guard let cwd = session.cwd else { return false }
-                return git.topLevel(of: cwd) == repositoryPath
-            })
+        if sources.allows(.codex) {
+            if codex.isAvailable {
+                do {
+                    let recent = try codex.discoverSessions(
+                        modifiedWithin: config.codexLookbackDays, cache: cache
+                    )
+                    found.append(contentsOf: recent.filter { session in
+                        guard let cwd = session.cwd else { return false }
+                        return git.topLevel(of: cwd) == repositoryPath
+                    })
+                } catch {
+                    onReadFailure?("Codex: \(error.localizedDescription)")
+                }
+            } else {
+                onReadFailure?("Codex: session files are not available")
+            }
         }
 
-        return found.sorted {
-            ($0.lastActivityAt ?? .distantPast) < ($1.lastActivityAt ?? .distantPast)
+        if sources.allows(.openCode) {
+            if FileManager.default.fileExists(atPath: openCodeDatabase.path) {
+                do {
+                    let root = FilePathCanon.canonical(repositoryPath)
+                    if let (directory, entry) = try OpenCodeStore.sessionsByDirectoryChecked(at: openCodeDatabase)
+                        .filter({ $0.key == root || $0.key.hasPrefix(root + "/") })
+                        .max(by: { $0.value.modifiedAt < $1.value.modifiedAt }),
+                       let title = entry.lastPrompt, !title.isEmpty {
+                        found.append(AgentSession(
+                            id: entry.sessionId ?? directory,
+                            agent: .openCode,
+                            cwd: directory,
+                            title: title,
+                            lastActivityAt: entry.modifiedAt,
+                            filePath: openCodeDatabase.path
+                        ))
+                    }
+                } catch {
+                    onReadFailure?("OpenCode: \(error.localizedDescription)")
+                }
+            } else {
+                onReadFailure?("OpenCode: session database is not available")
+            }
         }
+
+        // A fresh Git commit does not make an old agent title or prompt fresh.
+        // Filter each session before choosing the title and prompt arc.
+        let cutoff = Date().addingTimeInterval(-Double(config.staleDays) * 86_400)
+        return found
+            .filter { ($0.lastActivityAt ?? .distantPast) >= cutoff }
+            .sorted { ($0.lastActivityAt ?? .distantPast) < ($1.lastActivityAt ?? .distantPast) }
     }
 
     /// The last few things the user actually asked, redacted, oldest first.

@@ -43,11 +43,8 @@ public struct PlaceRecall: Sendable {
         case notARepository
         /// FlowTrace was not allowed to open any agent's transcript.
         case transcriptsNotAllowed
-        /// Allowed to look, and there was no session for this place.
+        /// Allowed to look, but no usable handoff could be assembled.
         case noSessionsFound
-        /// The last session here is old enough that quoting it would be
-        /// misleading rather than helpful.
-        case sessionsAreStale
 
         public var explanation: String {
             switch self {
@@ -58,18 +55,20 @@ public struct PlaceRecall: Sendable {
             case .transcriptsNotAllowed:
                 "You haven't switched on any agent here, so FlowTrace hasn't read what was asked."
             case .noSessionsFound:
-                "No agent session was found for this place."
-            case .sessionsAreStale:
-                "The last session here is old enough that it probably isn't what you're after."
+                "FlowTrace could not build a recent handoff for this place."
             }
         }
     }
 
     public var gaps: [Gap]
+    /// Enabled agent sources that could not be read. Results from other sources
+    /// remain visible; these failures prevent an empty result from looking final.
+    public var sourceFailures: [String]
 
     public init(
         path: String, name: String, git: GitState? = nil, brief: ResumeBrief? = nil,
-        note: ProjectNote? = nil, live: LiveProject? = nil, gaps: [Gap] = []
+        note: ProjectNote? = nil, live: LiveProject? = nil, gaps: [Gap] = [],
+        sourceFailures: [String] = []
     ) {
         self.path = path
         self.name = name
@@ -78,6 +77,7 @@ public struct PlaceRecall: Sendable {
         self.note = note
         self.live = live
         self.gaps = gaps
+        self.sourceFailures = sourceFailures
     }
 
     // MARK: - What to lead with
@@ -136,6 +136,37 @@ public struct PlaceRecall: Sendable {
         return step
     }
 
+    /// Context to paste into an agent when returning to this place.
+    /// A note the person wrote leads; inferred history follows it. Notes can
+    /// contain pasted credentials, so they go through the same redaction as
+    /// transcript text before leaving FlowTrace on the clipboard.
+    public var handoff: String? {
+        var ownWords: [String] = []
+        if let building = safeNoteLine(note?.building) {
+            ownWords.append("You wrote that you were building: \(building)")
+        }
+        if let step = safeNoteLine(note?.nextStep) {
+            ownWords.append("You wrote the next step: \(step)")
+        }
+        let livePrompt = brief == nil ? safeNoteLine(live?.lastPrompt) : nil
+        guard !ownWords.isEmpty || brief != nil || livePrompt != nil else { return nil }
+
+        var sections = ["Repository: \(name) (\(path))"]
+        if !ownWords.isEmpty { sections.append(ownWords.joined(separator: "\n")) }
+        if let brief { sections.append(brief.render()) }
+        if let livePrompt { sections.append("Last observed agent prompt: \(livePrompt)") }
+        return sections.joined(separator: "\n\n")
+    }
+
+    private func safeNoteLine(_ text: String?) -> String? {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let redacted = Redaction.redact(text)
+        guard !redacted.isEmpty, !Redaction.isOnlyRedactions(redacted) else { return nil }
+        return AgentSession.condense(redacted.text, limit: 300)
+    }
+
     /// True when the user marked this place as deliberately parked. It stops
     /// the screen calling paused work "forgotten" back at them.
     public var isPaused: Bool { note?.isPaused == true }
@@ -147,8 +178,11 @@ public struct PlaceRecall: Sendable {
     /// user their work left no trace when in fact FlowTrace was never allowed
     /// to look for one.
     public var intentAbsence: String {
+        if !sourceFailures.isEmpty {
+            return "FlowTrace could not read all enabled agent conversations here, so this answer may be incomplete."
+        }
         if gaps.contains(.transcriptsNotAllowed) {
-            return "FlowTrace hasn't read anything here, so it can't say what this was for."
+            return "FlowTrace hasn't read agent conversations here, so it can't say what this was for."
         }
         if gaps.contains(.placeIsGone) {
             return "This folder is gone, so there is nothing left to read."
@@ -209,12 +243,17 @@ public struct PlaceRecallBuilder: Sendable {
         var opened = config
         opened.quietHours = 0
 
-        recall.brief = briefs.build(repositoryPath: path, sources: sources, config: opened)
-        if recall.brief == nil {
-            // A repository older than the staleness limit has sessions that
-            // exist but are not worth quoting; anything else simply had none.
-            let age = recall.git?.daysSinceLastCommit ?? 0
-            recall.gaps.append(age > config.staleDays ? .sessionsAreStale : .noSessionsFound)
+        var sourceFailures: [String] = []
+        recall.brief = briefs.build(
+            repositoryPath: path, sources: sources, config: opened,
+            onReadFailure: { sourceFailures.append($0) }
+        )
+        recall.sourceFailures = sourceFailures
+        if recall.brief == nil, recall.sourceFailures.isEmpty {
+            // BriefBuilder can be silent for several reasons: no session,
+            // stale work, no useful text, or a read failure. Git's last commit
+            // cannot distinguish them, so the screen does not guess.
+            recall.gaps.append(.noSessionsFound)
         }
         return recall
     }

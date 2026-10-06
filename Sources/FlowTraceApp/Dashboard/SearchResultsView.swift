@@ -7,6 +7,11 @@ struct SearchResultsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
+                if model.searchResults.first?.matchQuality == .partial {
+                    Text("No result matched every word. Showing partial matches.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
                 if model.searchResults.isEmpty {
                     EmptyState(
                         icon: "magnifyingglass",

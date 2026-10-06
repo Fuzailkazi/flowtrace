@@ -24,11 +24,16 @@ struct PlaceRecallView: View {
     @State private var nextStep = ""
     @State private var editing = false
     @State private var copied = false
+    @State private var loadID = UUID()
+    @State private var noteReadFailure: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Journal.Space.xl) {
                 backLink
+                if let noteReadFailure {
+                    LoadFailureNotice(message: noteReadFailure) { load() }
+                }
                 if loading {
                     ProgressView().controlSize(.small)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -55,12 +60,16 @@ struct PlaceRecallView: View {
     // MARK: - Heading
 
     private var backLink: some View {
-        Button {
-            model.route = .now
+        let fromScan: Bool = {
+            if case .proposalPlace = model.route { return true }
+            return false
+        }()
+        return Button {
+            model.route = fromScan ? .dashboard : .now
         } label: {
             HStack(spacing: Journal.Space.xs) {
                 Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                Text("Now").font(.caption())
+                Text(fromScan ? "Scan results" : "Now").font(.caption())
             }
             .foregroundStyle(Journal.inkSoft)
         }
@@ -176,7 +185,11 @@ struct PlaceRecallView: View {
         // a port is part of remembering — the list of ports is not.
         if let live = recall.live, !live.servers.isEmpty {
             let ports = live.servers.map { ":\($0.port)" }.joined(separator: ", ")
-            lines.append("Something you started here is still listening on \(ports).")
+            if model.census.isFresh {
+                lines.append("Something you started here is still listening on \(ports).")
+            } else {
+                lines.append("A server was listening on \(ports) as of \(model.census.takenLabel ?? "the last check").")
+            }
         }
         return lines
     }
@@ -213,8 +226,14 @@ struct PlaceRecallView: View {
     /// as "there was nothing here", which is a different and often wrong claim.
     private func whatIsMissing(_ recall: PlaceRecall) -> some View {
         Group {
-            if !recall.gaps.isEmpty {
+            if !recall.gaps.isEmpty || !recall.sourceFailures.isEmpty {
                 VStack(alignment: .leading, spacing: Journal.Space.s) {
+                    ForEach(recall.sourceFailures, id: \.self) { failure in
+                        Label("Could not read \(failure)", systemImage: "exclamationmark.triangle")
+                            .font(.caption())
+                            .foregroundStyle(Journal.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     ForEach(recall.gaps, id: \.self) { gap in
                         HStack(alignment: .top, spacing: Journal.Space.s) {
                             Image(systemName: "questionmark.circle")
@@ -290,19 +309,28 @@ struct PlaceRecallView: View {
 
     private func actions(_ recall: PlaceRecall) -> some View {
         HStack(spacing: Journal.Space.s) {
-            Button {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
-            } label: {
-                Label("Open in Finder", systemImage: "folder")
+            if !recall.gaps.contains(.placeIsGone) {
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                } label: {
+                    Label("Open in Finder", systemImage: "folder")
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
 
-            if let brief = recall.brief {
-                // The same text the command line hands an agent. Copying it is
-                // the shortest path from "I remember now" back to working.
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+                model.toast = Toast(message: "Copied the folder path.")
+            } label: {
+                Label("Copy path", systemImage: "doc.on.clipboard")
+            }
+
+            if let handoff = recall.handoff {
+                // Include the person's own note before the inferred history.
                 Button {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(brief.render(), forType: .string)
+                    NSPasteboard.general.setString(handoff, forType: .string)
                     copied = true
                 } label: {
                     Label(copied ? "Copied" : "Copy handoff", systemImage: "doc.on.doc")
@@ -345,19 +373,31 @@ struct PlaceRecallView: View {
 
     private func load() {
         loading = true
+        copied = false
+        noteReadFailure = nil
+        let requestID = UUID()
+        loadID = requestID
+        let requestedPath = path
         let sources = model.readableSources
-        let note = try? model.store.projectNote(for: path)
+        let note: ProjectNote?
+        do {
+            note = try model.store.projectNote(for: requestedPath)
+        } catch {
+            note = nil
+            noteReadFailure = "Couldn't read your saved note for this place: \(error.localizedDescription)"
+        }
         // The reading Now already took, rather than a second one: taking our
         // own would cost the best part of a second and could disagree with the
         // row the user just clicked.
-        let live = model.liveProject(at: path)
-        let name = live?.name ?? SessionImporter.folderLabel(for: path)
+        let live = model.liveProject(at: requestedPath)
+        let name = live?.name ?? SessionImporter.folderLabel(for: requestedPath)
 
         Task.detached(priority: .userInitiated) {
             let built = PlaceRecallBuilder().build(
-                path: path, name: name, sources: sources, note: note, live: live
+                path: requestedPath, name: name, sources: sources, note: note, live: live
             )
             await MainActor.run {
+                guard loadID == requestID, path == requestedPath else { return }
                 recall = built
                 building = built.note?.building ?? ""
                 nextStep = built.note?.nextStep ?? ""

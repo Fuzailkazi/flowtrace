@@ -4,7 +4,7 @@
 
 <h1 align="center">FlowTrace</h1>
 
-<p align="center"><strong>Remember what you were doing. Find it when you forget.</strong></p>
+<p align="center"><strong>Find the coding work you left behind, across repositories and agents.</strong></p>
 
 <p align="center">A local-first memory and retrieval app for macOS.</p>
 
@@ -13,19 +13,22 @@
   · <a href="https://github.com/Fuzailkazi/flowtrace/issues">Report an issue</a>
 </p>
 
-FlowTrace keeps useful context from your work — notes, screenshots, browser pages,
-terminal sessions, coding-agent sessions, repositories, and projects — so you can
-recover it later without remembering exactly where you saw it.
+FlowTrace shows the coding agents, local servers, and repositories still active on
+your Mac, alongside notes you chose to save. It helps you recover where work
+stopped without remembering which repository or agent session to open first.
+
+The current release stores notes and work context. Screenshot capture and visual
+search are planned; they are not available yet.
 
 Everything is stored on your Mac. FlowTrace does not require an account or a cloud
 backend.
 
 ## Download and install
 
-### Recommended: download the app
+### Current test build
 
-1. Open the [latest FlowTrace release](https://github.com/Fuzailkazi/flowtrace/releases).
-2. Download `FlowTrace-0.1.0-macOS.zip`.
+1. Open the [FlowTrace releases page](https://github.com/Fuzailkazi/flowtrace/releases).
+2. Download the macOS ZIP from the latest release.
 3. Unzip it and move `FlowTrace.app` to `/Applications`.
 4. Open FlowTrace from Applications.
 
@@ -37,8 +40,9 @@ still reports that the app cannot be opened, run:
 xattr -dr com.apple.quarantine /Applications/FlowTrace.app
 ```
 
-Then open FlowTrace again. Developer ID signing and notarization are planned for a
-future public release.
+Then open FlowTrace again. The current download is suitable for a technical beta;
+a Developer ID signed and notarized build is still needed for a smooth public
+installation.
 
 ### Build it yourself
 
@@ -52,8 +56,28 @@ cd flowtrace
 open dist/FlowTrace.app
 ```
 
-The build creates `dist/FlowTrace.app`, `dist/flowtrace`, and
-`dist/FlowTrace-0.1.0-macOS.zip`.
+The default build creates `dist/FlowTrace.app`, `dist/flowtrace`, and
+`dist/FlowTrace-0.1.0-macOS.zip`. For a new candidate, set a distinct numeric
+version and build number, for example
+`FLOWTRACE_VERSION=0.1.1 FLOWTRACE_BUILD_NUMBER=2 ./Scripts/bundle.sh release`.
+That example writes `FlowTrace-0.1.1-build2-macOS.zip`.
+
+### Prepare a public download
+
+This requires an Apple Developer ID Application certificate and a configured
+`notarytool` keychain profile. Replace the example identity and profile with your
+own:
+
+```bash
+FLOWTRACE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./Scripts/bundle.sh release
+./Scripts/notarize-release.sh dist/FlowTrace-0.1.0-macOS.zip YOUR_PROFILE
+```
+
+The script checks the signature before submission, waits for acceptance, staples
+the app, and writes a separate `-notarized.zip`. Its final check extracts that
+archive and verifies the signature, hardened runtime, timestamp, stapled ticket,
+and Gatekeeper acceptance. Test installation and permissions in a clean macOS
+user account before sharing the ZIP widely.
 
 ## First launch
 
@@ -61,8 +85,8 @@ FlowTrace opens its workspace automatically. During onboarding, choose the data
 sources you want it to read. Access is opt-in and can be changed later in
 **Settings**.
 
-Depending on the features you enable, macOS may ask for Accessibility, Automation,
-or Screen Recording permission. FlowTrace does not read page contents, cookies,
+Depending on the features you enable, macOS may ask for Accessibility or Automation
+permission. FlowTrace does not read page contents, cookies,
 form fields, passwords, or private messages. Disable any source in Settings when
 you do not want it observed.
 
@@ -73,10 +97,8 @@ you do not want it observed.
 Press the configured Quick Capture shortcut (the default is `⌥ Space`) from any
 app. Choose one of these capture modes:
 
-- **Remember this** — saves a screenshot with surrounding app, window, browser,
-  URL, project, and agent context when available.
-- **Take a note** — saves your thought and surrounding context; screenshots are
-  optional and off by default.
+- **Quick Capture** — writes a note with the surrounding app, window, browser,
+  URL, and project context when available. No screenshot is taken.
 
 ### See what is happening now
 
@@ -86,16 +108,15 @@ answer: “What was I doing here?”
 
 ### Find something later
 
-Use **Memories** and search with whatever you remember:
+Use **Memories** and search for words from a note or project name:
 
 ```text
-the Stripe pricing page
-that error from yesterday
-the portfolio screenshot
-what was I doing in the terminal?
+Stripe pricing
+webhook error
+portfolio redesign
 ```
 
-FlowTrace searches your notes and locally stored context using SQLite and FTS5.
+FlowTrace searches notes you wrote and project notes using SQLite and FTS5.
 
 ### Choose a theme
 
@@ -124,6 +145,9 @@ FlowTrace is local-first:
 - Memories are stored in a local SQLite database.
 - Search is performed locally with SQLite FTS5.
 - Agent transcripts are read only for sources you explicitly enable.
+- Quick Capture reads the front app and window title when invoked. For a supported browser,
+  it also tries to read the active tab title and URL if macOS permits; this on-demand read
+  is separate from the agent-history switches. Discarding the panel creates no memory.
 - Sensitive values are redacted before supported context is persisted.
 - No FlowTrace account or cloud service is required.
 - The local server, when enabled, is bound to the local machine and uses a token.
@@ -216,6 +240,9 @@ FlowTrace is actively developed. The current app includes the native macOS
 workspace, onboarding and consent controls, Quick Capture, Now, Timeline,
 Memories, local search, project and agent context, browser context, local CLI,
 optional browser extension support, light/dark themes, and release bundling.
+The [current product audit](PRODUCT_AUDIT.md) tracks the largest adoption gaps
+and the evidence needed before a wider launch. The [beta study guide](BETA_STUDY.md)
+is ready for observed tests with target developers.
 
 ## License
 

@@ -40,9 +40,9 @@ struct DashboardView: View {
         if !model.proposals.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 SectionHeader(
-                    title: "Needs attention",
+                    title: "From past sessions",
                     count: model.proposals.count,
-                    subtitle: "found in your repositories — confirm to keep, dismiss to hide"
+                    subtitle: "Review a place, save it as a thread, or dismiss the suggestion"
                 )
                 ForEach(model.proposals) { proposal in
                     ProposalCard(model: model, proposal: proposal)
@@ -112,22 +112,26 @@ struct DashboardView: View {
 
     private var emptyDashboard: some View {
         VStack(spacing: Theme.Space.l) {
-            if model.consent.anyEnabled {
+            if model.canScanPastSessions {
                 EmptyState(
-                    icon: "checkmark.circle",
-                    title: "Nothing unfinished",
-                    message: "Every repository FlowTrace can see is committed and pushed. "
-                        + "Create a thread when you start something you'll want to come back to.",
-                    actionLabel: "New work thread",
-                    action: { NotificationCenter.default.post(name: .flowtraceNewThread, object: nil) }
+                    icon: "sparkle.magnifyingglass",
+                    title: "No places saved here yet",
+                    message: "Browse recent places from the agent sources you enabled, "
+                        + "including clean repositories. FlowTrace can also flag older "
+                        + "repositories with uncommitted or unpushed work.",
+                    actionLabel: "Browse agent history",
+                    action: {
+                        model.route = .now
+                        model.scan()
+                    }
                 )
             } else {
                 EmptyState(
                     icon: "sparkle.magnifyingglass",
                     title: "Let FlowTrace find your unfinished work",
-                    message: "Turn on a source in Settings and FlowTrace will read your coding-agent "
-                        + "sessions and git state — locally, read-only — to work out what you started "
-                        + "and never finished.",
+                    message: "Turn on Claude Code or Codex in Settings to look through those "
+                        + "local sessions and repository state. OpenCode can add live context "
+                        + "but is not included in the historical scan.",
                     actionLabel: "Open Settings",
                     action: { model.route = .settings }
                 )

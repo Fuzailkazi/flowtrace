@@ -47,6 +47,24 @@ func runNowTests() {
         expectEqual(sections.background.count, 1)
     }
 
+    TestKit.test("a recent project note is human activity even with transcripts off") {
+        var project = attentionProject("noted", humanDaysAgo: nil, serverPort: 3000)
+        project.note = ProjectNote(repositoryPath: project.path, repositoryName: project.name,
+                                   building: "finish webhook retries")
+        let sections = AttentionRanker(now: Date()).rank([project])
+        expectEqual(sections.continueWork.map(\.name), ["noted"])
+        expect(sections.background.isEmpty)
+    }
+
+    TestKit.test("a deliberately paused note does not become a Continue nudge") {
+        var project = attentionProject("paused", humanDaysAgo: 1)
+        project.note = ProjectNote(repositoryPath: project.path, repositoryName: project.name,
+                                   building: "return later", isPaused: true)
+        let sections = AttentionRanker(now: Date()).rank([project])
+        expect(sections.continueWork.isEmpty)
+        expectEqual(sections.background.map(\.name), ["paused"])
+    }
+
     TestKit.test("recent human attention outranks a fresher machine heartbeat") {
         let human = attentionProject("human", humanDaysAgo: 1, machineMinutesAgo: 60,
                                      prompt: "finish the launch brief")
@@ -63,6 +81,10 @@ func runNowTests() {
         expectEqual(sections.continueWork.count, 2)
         expectEqual(sections.recent.count, 6)
         expect(Set(sections.continueWork.map(\.path)).isDisjoint(with: sections.recent.map(\.path)))
+        let highlighted = Set((sections.continueWork + sections.recent).map(\.path))
+        expect(Set(sections.background.map(\.path)).isDisjoint(with: highlighted),
+               "a place appears in one section only")
+        expectEqual(sections.background.count, 2)
     }
 
     TestKit.test("work older than thirty days is background, not recent") {

@@ -15,6 +15,9 @@ enum Route: Hashable {
     /// One place, opened to remember what was happening in it. The string is
     /// the canonical repository path.
     case place(String)
+    /// A place opened from a historical scan suggestion; Back returns to the
+    /// suggestions rather than dropping the user onto Now.
+    case proposalPlace(String)
     case dashboard
     case status(ThreadStatus)
     case thread(String)
@@ -25,6 +28,7 @@ enum Route: Hashable {
 enum ScanState: Equatable {
     case idle
     case running(phase: String, fraction: Double)
+    case cancelling
     case finished(ScanSummary)
     case failed(String)
 
@@ -33,6 +37,8 @@ enum ScanState: Equatable {
         var sessions: Int
         var repositories: Int
         var duration: TimeInterval
+        var sourceFailures: [String]
+        var sourceWarnings: [String]
     }
 
     var isRunning: Bool { if case .running = self { true } else { false } }
@@ -100,9 +106,14 @@ final class AppModel {
     var searchResults: [SearchHit] = []
 
     var scanState: ScanState = .idle
+    var recentSessionPlaces: [RecentSessionPlace] = []
+    @ObservationIgnored private var activeScanID: UUID?
+    @ObservationIgnored private var activeScanJobID: UUID?
+    @ObservationIgnored private var dataJobs: [UUID: Task<Void, Never>] = [:]
     var consent = ConsentSettings.load()
     var toast: Toast?
     var loadFailure: String?
+    var isDeletingAllData = false
 
     /// True while the very first load is in flight, so the window shows a
     /// loading state rather than an empty one it will immediately replace.
@@ -111,6 +122,7 @@ final class AppModel {
     /// Endpoint the browser extension and CLI talk to. Off until the user turns
     /// it on, like every other integration.
     private var server: LocalServer?
+    @ObservationIgnored private var serverStartJob: Task<Void, Never>?
     var serverPort: UInt16?
     var serverError: String?
 
@@ -149,7 +161,11 @@ final class AppModel {
     /// route rather than from a separate flag so there is nothing to keep in
     /// step: if the screen is showing a place, this is that place.
     var viewedPlace: (path: String, name: String)? {
-        guard case .place(let path) = route else { return nil }
+        let path: String
+        switch route {
+        case .place(let opened), .proposalPlace(let opened): path = opened
+        default: return nil
+        }
         let name = liveProject(at: path)?.name ?? SessionImporter.folderLabel(for: path)
         return (FilePathCanon.canonical(path), name)
     }
@@ -168,6 +184,12 @@ final class AppModel {
         if consent.codex { sources.insert(.codex) }
         if consent.openCode { sources.insert(.openCode) }
         return sources
+    }
+
+    /// The historical unfinished-work scanner has adapters for these two
+    /// sources. OpenCode can enrich live places but has no scan adapter.
+    var canScanPastSessions: Bool {
+        mayObserve && (consent.claudeCode || consent.codex)
     }
 
     /// How the quick-capture panel is summoned. Changing it re-registers the
@@ -262,13 +284,16 @@ final class AppModel {
         let sources = readableSources
         guard sources != .none else { return }
         let store = self.store
-        Task.detached(priority: .utility) {
+        let jobID = UUID()
+        dataJobs[jobID] = Task.detached(priority: .utility) { [weak self] in
             let cache = StoreSessionCache(store: store)
             let count = SessionImporter(sources: sources)
                 .importSessions(on: day, into: store, cache: cache)
             cache.flush()
-            guard count > 0 else { return }
-            await MainActor.run { [weak self] in self?.activityRevision += 1 }
+            await MainActor.run { [weak self] in
+                if count > 0 { self?.activityRevision += 1 }
+                self?.dataJobs.removeValue(forKey: jobID)
+            }
         }
     }
 
@@ -333,15 +358,20 @@ final class AppModel {
             }
         }
         self.server = server
-        Task.detached(priority: .utility) { [weak self] in
+        serverStartJob = Task.detached(priority: .utility) { [weak self] in
             do {
                 try server.start()
                 await MainActor.run { [weak self] in
-                    self?.serverError = nil
-                    self?.serverPort = server.port
+                    guard let self, self.server === server, self.localServerEnabled else {
+                        server.stop()
+                        return
+                    }
+                    self.serverError = nil
+                    self.serverPort = server.port
                 }
             } catch {
                 await MainActor.run { [weak self] in
+                    guard self?.server === server else { return }
                     self?.serverError = error.localizedDescription
                     self?.server = nil
                 }
@@ -485,16 +515,30 @@ final class AppModel {
     // MARK: - Scanning
 
     func scan() {
-        guard consent.anyEnabled, !scanState.isRunning else { return }
+        guard canScanPastSessions, activeScanJobID == nil else { return }
 
         var adapters: [any AgentAdapter] = []
         if consent.claudeCode { adapters.append(ClaudeCodeAdapter()) }
         if consent.codex { adapters.append(CodexAdapter()) }
 
+        let scanID = UUID()
+        activeScanID = scanID
         scanState = .running(phase: "Starting", fraction: 0)
+        recentSessionPlaces = []
         let store = self.store
 
-        Task.detached(priority: .userInitiated) {
+        let jobID = UUID()
+        activeScanJobID = jobID
+        dataJobs[jobID] = Task.detached(priority: .userInitiated) { [weak self] in
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.dataJobs.removeValue(forKey: jobID)
+                    if self?.activeScanJobID == jobID {
+                        self?.activeScanJobID = nil
+                        if self?.scanState == .cancelling { self?.scanState = .idle }
+                    }
+                }
+            }
             do {
                 let cache = StoreSessionCache(store: store)
                 let ignored = try store.ignoredPaths()
@@ -507,27 +551,84 @@ final class AppModel {
                         ? Double(progress.completed) / Double(progress.total)
                         : 0
                     Task { @MainActor [weak self] in
+                        guard self?.activeScanID == scanID,
+                              self?.scanState.isRunning == true else { return }
                         self?.scanState = .running(phase: progress.phase, fraction: fraction)
                     }
                 }
+                try Task.checkCancellation()
                 cache.flush()
+                try Task.checkCancellation()
                 _ = try store.mergeProposals(result.proposals)
 
                 await MainActor.run { [weak self] in
+                    guard self?.activeScanID == scanID else { return }
+                    self?.activeScanID = nil
+                    if result.sourcesRead == 0 && !result.sourceFailures.isEmpty {
+                        self?.scanState = .failed(result.sourceFailures.joined(separator: "\n"))
+                        return
+                    }
+                    self?.recentSessionPlaces = result.recentPlaces
                     self?.scanState = .finished(.init(
                         proposals: result.proposals.count,
                         sessions: result.sessionsScanned,
                         repositories: result.repositoriesProbed,
-                        duration: result.duration
+                        duration: result.duration,
+                        sourceFailures: result.sourceFailures,
+                        sourceWarnings: result.sourceWarnings
                     ))
                     self?.refresh()
                 }
             } catch {
                 await MainActor.run { [weak self] in
+                    guard self?.activeScanID == scanID else { return }
+                    self?.activeScanID = nil
                     self?.scanState = .failed(error.localizedDescription)
                 }
             }
         }
+    }
+
+    /// Results from a scan started under an older source choice must not be
+    /// shown after that choice changes.
+    func cancelScan() {
+        if let activeScanJobID { dataJobs[activeScanJobID]?.cancel() }
+        activeScanID = nil
+        scanState = activeScanJobID == nil ? .idle : .cancelling
+        recentSessionPlaces = []
+    }
+
+    func sourceConsentChanged() { cancelScan() }
+
+    /// Stop automatic writers, wait for scans/imports already in flight, then
+    /// erase. Otherwise a job that started before the user pressed Delete can
+    /// refill the database just after the button reports success.
+    func deleteAllStoredData() async throws {
+        guard !isDeletingAllData else {
+            throw NSError(domain: "FlowTrace", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "A deletion is already in progress."
+            ])
+        }
+        isDeletingAllData = true
+        defer { isDeletingAllData = false }
+        isRecording = false
+        consent.claudeCode = false
+        consent.codex = false
+        consent.openCode = false
+        consent.save()
+        let stoppedServer = server
+        localServerEnabled = false
+        cancelScan()
+
+        await recorder.settled()
+        await serverStartJob?.value
+        await stoppedServer?.settled()
+        let pending = Array(dataJobs.values)
+        for job in pending { await job.value }
+        try store.deleteAllData()
+        try LocalCredentials.clearToken()
+        UserDefaults.standard.removeObject(forKey: ActivityRecorder.lastSeenAtKey)
+        refresh()
     }
 
     // MARK: - Search

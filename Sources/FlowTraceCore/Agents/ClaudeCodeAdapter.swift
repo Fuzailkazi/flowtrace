@@ -38,9 +38,9 @@ public struct ClaudeCodeAdapter: AgentAdapter {
                                  cache: SessionCache? = nil) throws -> [AgentSession] {
         let slug = Self.projectSlug(for: repositoryPath)
         let fm = FileManager.default
-        guard let directories = try? fm.contentsOfDirectory(
+        let directories = try fm.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
-        ) else { return [] }
+        )
 
         let matching = directories.filter { url in
             let name = url.lastPathComponent
@@ -49,27 +49,39 @@ public struct ClaudeCodeAdapter: AgentAdapter {
 
         var files: [String] = []
         for directory in matching {
-            guard let entries = try? fm.contentsOfDirectory(
+            let entries = try fm.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil
-            ) else { continue }
+            )
             files.append(contentsOf: entries.filter { $0.pathExtension == "jsonl" }.map(\.path))
         }
         return ConcurrentParse.sessions(in: files) { parse(file: $0, cache: cache) }
     }
 
     public func discoverSessions(cache: SessionCache? = nil) throws -> [AgentSession] {
+        try discoverSessionsWithDiagnostics(cache: cache).sessions
+    }
+
+    public func discoverSessionsWithDiagnostics(cache: SessionCache? = nil) throws -> AgentDiscovery {
         let fm = FileManager.default
-        guard let projectDirs = try? fm.contentsOfDirectory(
-            at: root, includingPropertiesForKeys: nil
-        ) else { return [] }
+        let projectDirs = try fm.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
 
         var files: [String] = []
+        var skippedDirectories = 0
         for dir in projectDirs {
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: dir.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
             guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
-            else { continue }
+            else { skippedDirectories += 1; continue }
             files.append(contentsOf: entries.filter { $0.pathExtension == "jsonl" }.map(\.path))
         }
-        return ConcurrentParse.sessions(in: files) { parse(file: $0, cache: cache) }
+        let parsed = ConcurrentParse.report(in: files) { parse(file: $0, cache: cache) }
+        return AgentDiscovery(
+            sessions: parsed.sessions, skippedFiles: parsed.skippedFiles,
+            skippedDirectories: skippedDirectories
+        )
     }
 
     func parse(file path: String, cache: SessionCache?) -> AgentSession? {

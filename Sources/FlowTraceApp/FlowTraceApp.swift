@@ -273,6 +273,7 @@ struct MainWindow: View {
                 .toolbar { chrome }
         }
         .navigationSplitViewStyle(.balanced)
+        .disabled(model.isDeletingAllData)
         .sheet(isPresented: $showingCapture) { CaptureSheet(model: model) }
         .sheet(isPresented: $showingNewThread) { NewThreadSheet(model: model) }
         .overlay(alignment: .bottom) {
@@ -289,9 +290,11 @@ struct MainWindow: View {
         .animation(.snappy(duration: 0.2), value: model.toast)
         .background(Journal.paper)
         .onReceive(NotificationCenter.default.publisher(for: .flowtraceNewThread)) { _ in
+            guard !model.isDeletingAllData else { return }
             showingNewThread = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .flowtraceCapture)) { _ in
+            guard !model.isDeletingAllData else { return }
             showingCapture = true
         }
     }
@@ -353,6 +356,8 @@ struct DetailPane: View {
             case .memory(let id):
                 MemoryDetailView(model: model, eventId: id)
             case .place(let path):
+                PlaceRecallView(model: model, path: path)
+            case .proposalPlace(let path):
                 PlaceRecallView(model: model, path: path)
             case .dashboard:
                 DashboardView(model: model)
@@ -426,7 +431,7 @@ struct FlowTraceCommands: Commands {
             Divider()
             Button("Scan for unfinished work") { model?.scan() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(!(model?.consent.anyEnabled ?? false))
+                .disabled(!(model?.canScanPastSessions ?? false))
         }
     }
 }

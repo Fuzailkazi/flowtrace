@@ -11,6 +11,23 @@ public final class FlowTraceDatabase {
 
     /// `~/Library/Application Support/FlowTrace/flowtrace.sqlite`
     public static var defaultURL: URL {
+        #if DEBUG
+        // Isolated UI runs must not migrate or write the person's real store.
+        // Release builds always use the normal application support directory.
+        if let directory = ProcessInfo.processInfo.environment["FLOWTRACE_DEV_SUPPORT_DIR"],
+           !directory.isEmpty {
+            return URL(fileURLWithPath: directory, isDirectory: true)
+                .appendingPathComponent("flowtrace.sqlite")
+        }
+        // A debug app opened by Launch Services does not inherit a test
+        // runner's environment. An explicitly marked debug bundle can still
+        // use a disposable profile without ever opening the person's store.
+        if let directory = Bundle.main.object(forInfoDictionaryKey: "FlowTraceDevSupportDirectory") as? String,
+           directory.hasPrefix("/"), directory != "/" {
+            return URL(fileURLWithPath: directory, isDirectory: true)
+                .appendingPathComponent("flowtrace.sqlite")
+        }
+        #endif
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("FlowTrace", isDirectory: true)
             .appendingPathComponent("flowtrace.sqlite")

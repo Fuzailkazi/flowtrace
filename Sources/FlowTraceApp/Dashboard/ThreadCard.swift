@@ -133,7 +133,7 @@ struct ProposalCard: View {
                         Chip(text: evidence.branch, color: .blue)
                     }
                     Spacer()
-                    Text("you stopped \(evidence.daysSinceLastCommit)d ago")
+                    Text("last commit \(evidence.daysSinceLastCommit)d ago")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.heatColor(days: evidence.daysSinceLastCommit))
                 }
@@ -195,14 +195,17 @@ struct ProposalCard: View {
 
                 HStack(spacing: Theme.Space.s) {
                     if isEditing {
-                        Button("Add thread") {
+                        Button("Save thread") {
                             model.accept(proposal, edited: (title, intent, nextStep))
                         }
                         .buttonStyle(.borderedProminent)
                         Button("Cancel") { isEditing = false }
                     } else {
-                        Button("Add thread") { model.accept(proposal, edited: nil) }
-                            .buttonStyle(.borderedProminent)
+                        Button("View context") {
+                            model.route = .proposalPlace(evidence.repositoryPath)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Save as thread") { model.accept(proposal, edited: nil) }
                         Button("Edit first") {
                             title = proposal.suggestedTitle
                             intent = proposal.suggestedIntent

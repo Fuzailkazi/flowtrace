@@ -152,6 +152,72 @@ func runRecallTests() {
                "never claims nothing was found when nothing was looked at")
     }
 
+    TestKit.test("an enabled source read error is not presented as empty history") {
+        let repo = try TempRepo(name: "unreadable-agent-source")
+        repo.write("main.swift", "print(1)")
+        repo.commit("start", daysAgo: 5)
+        let source = repo.root.appendingPathComponent("source-is-a-file")
+        try "not a directory".write(to: source, atomically: true, encoding: .utf8)
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let reader = PlaceRecallBuilder(briefs: BriefBuilder(
+            claude: ClaudeCodeAdapter(root: source)
+        ))
+        let recall = reader.build(
+            path: repo.path, name: "unreadable-agent-source",
+            sources: .claudeCode, config: config
+        )
+        expect(recall.git != nil, "the source failure must not hide Git context")
+        expectEqual(recall.sourceFailures.count, 1)
+        expectContains(recall.sourceFailures.first, "Claude Code")
+        expect(!recall.gaps.contains(.noSessionsFound), "no session is not a proven finding")
+        expectContains(recall.intentAbsence, "could not read")
+    }
+
+    TestKit.test("an unreadable OpenCode database is not presented as empty history") {
+        let repo = try TempRepo(name: "unreadable-opencode-source")
+        repo.write("main.swift", "print(1)")
+        repo.commit("start", daysAgo: 5)
+        let database = repo.root.appendingPathComponent("not-a-database.db")
+        try "not SQLite".write(to: database, atomically: true, encoding: .utf8)
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let reader = PlaceRecallBuilder(briefs: BriefBuilder(openCodeDatabase: database))
+        let recall = reader.build(
+            path: repo.path, name: "unreadable-opencode-source",
+            sources: .openCode, config: config
+        )
+        expectEqual(recall.sourceFailures.count, 1)
+        expectContains(recall.sourceFailures.first, "OpenCode")
+        expect(!recall.gaps.contains(.noSessionsFound))
+    }
+
+    TestKit.test("an unreadable Codex sessions directory is not presented as empty history") {
+        let repo = try TempRepo(name: "unreadable-codex-source")
+        repo.write("main.swift", "print(1)")
+        repo.commit("start", daysAgo: 5)
+        let source = repo.root.appendingPathComponent("codex-root")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try "not a directory".write(
+            to: source.appendingPathComponent("sessions"), atomically: true, encoding: .utf8
+        )
+
+        var config = BriefConfig()
+        config.noisePathFragments = []
+        let reader = PlaceRecallBuilder(briefs: BriefBuilder(
+            codex: CodexAdapter(root: source)
+        ))
+        let recall = reader.build(
+            path: repo.path, name: "unreadable-codex-source",
+            sources: .codex, config: config
+        )
+        expectEqual(recall.sourceFailures.count, 1)
+        expectContains(recall.sourceFailures.first, "Codex")
+        expect(!recall.gaps.contains(.noSessionsFound))
+    }
+
     TestKit.test("a note you wrote is still yours to read without any source switched on") {
         let recall = builder.build(
             path: scratch.path, name: "acme", sources: .none, note: note(building: "the billing rewrite")
@@ -165,7 +231,8 @@ func runRecallTests() {
     // false and the opposite of the consent promise.
     TestKit.test("an unread place is never told it left no trace") {
         let unread = builder.build(path: scratch.path, name: "acme", sources: .none)
-        expect(unread.intentAbsence.contains("hasn't read"), "got: \(unread.intentAbsence)")
+        expect(unread.intentAbsence.contains("hasn't read agent conversations"),
+               "got: \(unread.intentAbsence)")
         expect(!unread.intentAbsence.contains("nothing recorded"))
 
         let looked = PlaceRecall(path: scratch.path, name: "acme", gaps: [.noSessionsFound])
@@ -209,6 +276,43 @@ func runRecallTests() {
         expectEqual(project.agents.count, 2, "both are still there to be seen")
     }
 
+    TestKit.test("the last human prompt wins over newer agent output") {
+        let recentHuman = Date().addingTimeInterval(-3_600)
+        let olderHuman = Date().addingTimeInterval(-7_200)
+        let project = LiveProject(
+            path: scratch.path, name: "acme",
+            agents: [
+                LiveAgent(
+                    pid: 1, agent: .claudeCode, workingDirectory: scratch.path,
+                    projectRoot: scratch.path, repositoryName: "acme",
+                    lastPrompt: "older human request",
+                    lastActivityAt: Date().addingTimeInterval(-60),
+                    lastHumanActivityAt: olderHuman, state: .working
+                ),
+                LiveAgent(
+                    pid: 2, agent: .codex, workingDirectory: scratch.path,
+                    projectRoot: scratch.path, repositoryName: "acme",
+                    lastPrompt: "newer human request",
+                    lastActivityAt: Date().addingTimeInterval(-1_800),
+                    lastHumanActivityAt: recentHuman, state: .waiting
+                ),
+            ], servers: []
+        )
+        expectEqual(project.lastPrompt, "newer human request")
+    }
+
+    TestKit.test("an unread agent cannot supply a recovery prompt") {
+        let project = LiveProject(
+            path: scratch.path, name: "acme",
+            agents: [LiveAgent(
+                pid: 1, agent: .claudeCode, workingDirectory: scratch.path,
+                projectRoot: scratch.path, repositoryName: "acme",
+                lastPrompt: "private prompt", state: .waiting, transcriptHidden: true
+            )], servers: []
+        )
+        expectNil(project.lastPrompt)
+    }
+
     TestKit.test("an unread agent contributes no story at all") {
         let hidden = LiveProject(
             path: scratch.path, name: "acme",
@@ -229,11 +333,50 @@ func runRecallTests() {
     // rendering, the recovery button copies an empty string and the user finds
     // out by pasting it.
     TestKit.test("the handoff text names the place and what was happening") {
-        let text = brief(title: "Refactoring the importer", prompts: ["fix the flaky test"]).render()
+        let recall = PlaceRecall(
+            path: scratch.path, name: "acme",
+            brief: brief(title: "Refactoring the importer", prompts: ["fix the flaky test"]),
+            note: note(building: "the billing rewrite", nextStep: "run the migration")
+        )
+        let text = try unwrap(recall.handoff)
         expect(text.contains("acme"), "names the place")
+        expect(text.contains(scratch.path), "names the repository path")
         expect(text.contains("main"), "names the branch")
         expect(text.contains("Refactoring the importer"), "carries what the session was about")
+        expect(text.contains("the billing rewrite"), "includes the person's own description")
+        expect(text.contains("run the migration"), "includes the person's next step")
+        if let own = text.range(of: "the billing rewrite"),
+           let inferred = text.range(of: "Refactoring the importer") {
+            expect(own.lowerBound < inferred.lowerBound,
+                   "the person's own words lead the inferred history")
+        }
         expect(!text.isEmpty)
+    }
+
+    TestKit.test("a note can be handed off without a transcript and secrets are removed") {
+        let secret = "sk_" + "live_" + "51H8xQ2eZvKYlo2C" + "abcdefghijklmnopQ"
+        let recall = PlaceRecall(
+            path: scratch.path, name: "acme",
+            note: note(building: "finish auth", nextStep: "replace \(secret) before release")
+        )
+        let text = try unwrap(recall.handoff)
+        expectContains(text, "finish auth")
+        expectContains(text, "replace [api key removed] before release")
+        expectNotContains(text, secret)
+        expectNil(PlaceRecall(path: scratch.path, name: "acme").handoff)
+    }
+
+    TestKit.test("a live prompt can be handed off without a saved brief") {
+        let secret = "sk_" + "live_" + "51H8xQ2eZvKYlo2C" + "abcdefghijklmnopQ"
+        let recall = PlaceRecall(
+            path: scratch.path, name: "acme",
+            live: liveAgent("resume the parser after checking \(secret)")
+        )
+        let text = try unwrap(recall.handoff)
+        expectContains(text, scratch.path)
+        expectContains(text, "Last observed agent prompt: resume the parser")
+        expectContains(text, "[api key removed]")
+        expectNotContains(text, secret)
     }
 
     TestKit.test("a place still holding a port is worth mentioning") {

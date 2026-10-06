@@ -9,10 +9,8 @@ import GRDB
 /// copied and nothing written: this is somebody else's database and FlowTrace
 /// is a guest in it.
 ///
-/// Every failure here returns nothing rather than throwing. The database can be
-/// absent, mid-write, or a schema FlowTrace has never seen, and none of those
-/// are worth failing a live reading over — "no history for this agent" is a
-/// state the row already knows how to show.
+/// Live readings can tolerate an absent or changing store. Explicit recovery
+/// uses the checked variant so a failed read cannot look like empty history.
 public enum OpenCodeStore {
     /// Where OpenCode keeps its store, so Settings can name the file the
     /// switch is about rather than asking for trust in the abstract.
@@ -32,14 +30,15 @@ public enum OpenCodeStore {
     /// "forgotten" is precisely the false positive worth avoiding.
     static func sessionsByDirectory(at url: URL) -> [String: TranscriptIndex.Entry] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        return (try? sessionsByDirectoryChecked(at: url)) ?? [:]
+    }
 
+    static func sessionsByDirectoryChecked(at url: URL) throws -> [String: TranscriptIndex.Entry] {
         var configuration = Configuration()
         configuration.readonly = true
-        guard let queue = try? DatabaseQueue(path: url.path, configuration: configuration) else {
-            return [:]
-        }
+        let queue = try DatabaseQueue(path: url.path, configuration: configuration)
 
-        let rows: [Row]? = try? queue.read { db in
+        let rows: [Row] = try queue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, directory, title, time_updated
                 FROM session
@@ -47,7 +46,6 @@ public enum OpenCodeStore {
                 ORDER BY time_updated DESC
                 """)
         }
-        guard let rows else { return [:] }
 
         var newest: [String: TranscriptIndex.Entry] = [:]
         for row in rows {

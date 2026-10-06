@@ -115,8 +115,13 @@ public struct LiveProject: Identifiable, Sendable {
 
     /// The last thing you asked any agent here.
     public var lastPrompt: String? {
-        agents
-            .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
+        readAgents
+            .sorted { left, right in
+                let leftHuman = left.lastHumanActivityAt ?? .distantPast
+                let rightHuman = right.lastHumanActivityAt ?? .distantPast
+                if leftHuman != rightHuman { return leftHuman > rightHuman }
+                return (left.lastActivityAt ?? .distantPast) > (right.lastActivityAt ?? .distantPast)
+            }
             .compactMap(\.lastPrompt)
             .first
     }

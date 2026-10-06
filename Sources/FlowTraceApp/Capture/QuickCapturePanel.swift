@@ -73,6 +73,7 @@ final class QuickCaptureController {
 
     /// Snapshots where the user is, then shows the panel over it.
     func toggle() {
+        guard !model.isDeletingAllData else { return }
         Diagnostics.log("quick-capture toggle (visible: \(panel?.isVisible ?? false))")
         if let panel, panel.isVisible {
             dismiss()
@@ -133,7 +134,7 @@ final class QuickCaptureController {
                 let responder = panel.firstResponder
                 let fieldHasKeyboard = responder is NSTextView
                 Diagnostics.log(
-                    "panel over \(snapshot.appName) — key: \(panel.isKeyWindow), "
+                    "capture panel — key: \(panel.isKeyWindow), "
                     + "field ready: \(fieldHasKeyboard), "
                     + "responder: \(responder.map { String(describing: type(of: $0)) } ?? "none")"
                 )
@@ -147,7 +148,7 @@ final class QuickCaptureController {
         // Hand focus back to whatever the user was actually doing.
         if let app {
             app.activate()
-            Diagnostics.log("focus returned to \(app.localizedName ?? "previous app")")
+            Diagnostics.log("focus returned to previous app")
         }
     }
 }
