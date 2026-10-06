@@ -145,6 +145,9 @@ FlowTrace is local-first:
 - Memories are stored in a local SQLite database.
 - Search is performed locally with SQLite FTS5.
 - Agent transcripts are read only for sources you explicitly enable.
+- Quick Capture reads the front app and window title when invoked. For a supported browser,
+  it also tries to read the active tab title and URL if macOS permits; this on-demand read
+  is separate from the agent-history switches. Discarding the panel creates no memory.
 - Sensitive values are redacted before supported context is persisted.
 - No FlowTrace account or cloud service is required.
 - The local server, when enabled, is bound to the local machine and uses a token.

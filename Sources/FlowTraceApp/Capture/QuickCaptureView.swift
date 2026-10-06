@@ -58,7 +58,7 @@ struct QuickCaptureView: View {
         // evidence for a focus problem; anything else is not.
         .onDisappear {
             Diagnostics.log(
-                "capture closed over \(resolved.appName) — "
+                "capture closed — "
                 + "\(note.count) chars reached the field, saved: \(saved)"
             )
         }

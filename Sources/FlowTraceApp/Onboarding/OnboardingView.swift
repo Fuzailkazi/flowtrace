@@ -112,6 +112,11 @@ struct OnboardingView: View {
                     Text("Choose which local session histories FlowTrace may read. "
                          + "You can change this at any time in Settings.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("Quick Capture is separate: when you open it, FlowTrace reads the "
+                         + "front window and, if macOS permits, the active browser tab's "
+                         + "title and URL.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let failure = model.shortcutFailure {
@@ -163,6 +168,15 @@ struct OnboardingView: View {
                              + "contents. If you chose the optional count on the previous screen, "
                              + "FlowTrace read it once without saving it. Ongoing reading begins "
                              + "when you finish setup.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Label("When you capture a note", systemImage: "square.and.pencil")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.top, Theme.Space.xs)
+                        Text("Quick Capture reads the front app and window title when you open it. "
+                             + "For a supported browser, it also tries to read the active tab's "
+                             + "title and URL if macOS permits. This is separate from the agent "
+                             + "history choices above. Discarding the panel creates no memory.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text("No account or telemetry. Your work stays on this Mac.")
