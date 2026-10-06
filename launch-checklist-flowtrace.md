@@ -2,18 +2,18 @@
 
 **Launch type:** private, observed beta for 8–10 Mac developers using several coding-agent sessions across at least two repositories. **Date:** TBD after the product owner chooses the first problem to prove. **Public release:** separate gate.
 
-**Current internal candidate:** `/tmp/flowtrace-beta-frozen-c6f8edf/FlowTrace-0.1.1-build6-macOS.zip` (SHA-256 `0367b9561399e3782d2c476ec299fa8ce99ef496ccc457c7e70c9ba0860b2318`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `6`, built from an export of commit `c6f8edf` on `codex/flowtrace-beta-prep`. The clean exported source built the app and CLI and passed 370 tests. The archive passed plist and signature-integrity checks, has the production bundle ID, and contains no debug support-directory key. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
+**Current internal candidate:** `/tmp/flowtrace-beta-frozen-2fed4ed/FlowTrace-0.1.1-build7-macOS.zip` (SHA-256 `2c942dddf28351bfb4e7a060554b66b3047e6e608050a84e56957b72f96016ea`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `7`, built from an export of commit `2fed4ed` on `codex/flowtrace-beta-prep`. The clean exported source built the app and CLI and passed 372 tests. The archive passed plist and signature-integrity checks, has the production bundle ID, and contains no debug support-directory key. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
 
-Build 6 prevents a note from landing on the recorder's previous browser tab when the current tab could not be identified. Build 5 remains at `/tmp/flowtrace-beta-frozen-a857997/FlowTrace-0.1.1-build5-macOS.zip` as the preceding internal candidate; it added the visible Quick Capture context disclosure.
+Build 7 selects a live repository's prompt by the user's latest observed turn rather than the agent's latest output, while respecting disabled transcript sources. Build 6 remains at `/tmp/flowtrace-beta-frozen-c6f8edf/FlowTrace-0.1.1-build6-macOS.zip` as the preceding internal candidate; it prevents a note from landing on the previous browser tab when the current tab could not be identified.
 
-Earlier ad-hoc candidates were built from a dirty working tree. Builds 3 through 6 came from committed source. Build 6 excludes a pre-existing clickable-title edit still present in the working tree; that separate edit is not in this archive.
+Earlier ad-hoc candidates were built from a dirty working tree. Builds 3 through 7 came from committed source. Build 7 excludes a pre-existing clickable-title edit still present in the working tree; that separate edit is not in this archive.
 
 ## Before inviting participants (T-2w to T-1d)
 
 ### Product and engineering
 
 - [ ] Choose the beta's primary recovery job from [PRODUCT_DIRECTION_DECISION.md](PRODUCT_DIRECTION_DECISION.md). — **Owner:** Product owner — **Blocking:** Yes — **Due:** T-2w
-- [x] Freeze a reviewable source revision and assign a unique beta version and build number; rebuild the archive from that exact revision. Commit `c6f8edf`, 0.1.1 build 6. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
+- [x] Freeze a reviewable source revision and assign a unique beta version and build number; rebuild the archive from that exact revision. Commit `2fed4ed`, 0.1.1 build 7. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
 - [ ] Run the full test suite, debug/release builds, archive verification, and a fresh-profile capture → search → recovery walkthrough on the frozen revision. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
 - [ ] Check a clean macOS user account for first launch, source consent, shortcut, history scan including a clean repository, handoff, relaunch, export, and delete. Record failures. — **Owner:** Engineering — **Blocking:** Yes — **Due:** T-1w
 - [ ] Decide the install route: use a Developer ID signed and notarized ZIP for unassisted installs; if an observed technical beta uses ad-hoc signing, disclose the extra macOS opening step and record it as install friction. — **Owner:** Product owner + Engineering — **Blocking:** Yes — **Due:** T-1w
