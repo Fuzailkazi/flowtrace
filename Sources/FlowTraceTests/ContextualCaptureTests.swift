@@ -87,14 +87,16 @@ func runContextualCaptureTests(repositoryRoot: URL) {
 
     TestKit.test("the place is written even though nobody typed it") {
         let store = try store()
+        let capturedAt = Date(timeIntervalSince1970: 1_760_000_000)
         let target = try capture(
-            "come back to the webhook retry", place: (name: "acme", root: "/p/acme"), into: store
+            "come back to the webhook retry", place: (name: "acme", root: "/p/acme"),
+            into: store, at: capturedAt
         )
         let saved = try unwrap(try store.activity(id: target.id))
         // The user typed one sentence. Everything else was worked out.
         expectEqual(saved.metadata["place"], "acme")
-        expect(saved.appName != nil)
-        expect(saved.startedAt <= Date())
+        expectEqual(saved.appName, "FlowTrace")
+        expect(abs(saved.startedAt.timeIntervalSince(capturedAt)) < 0.01, "WHEN")
     }
 
     TestKit.suite("When it goes wrong")
