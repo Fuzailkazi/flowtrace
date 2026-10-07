@@ -223,10 +223,9 @@ func runCaptureTargetingTests() {
     }
 
     // The bug this rule exists for: the place resolves in its own task, and
-    // `save()` waits only on the tab. A one-word note and a fast Return reach
-    // the write while the editor is still being asked — and a nil answer there
-    // means "not yet", never "no project". Clearing on it would strip a place
-    // an earlier, slower capture had labelled correctly, and set nothing.
+    // An editor lookup can still time out before `save()` writes. A nil answer
+    // then means "not yet", never "no project". Clearing on it would strip a
+    // place an earlier capture had labelled correctly, and set nothing.
     TestKit.test("an editor not yet asked leaves the row's place alone") {
         expectEqual(editorSite(checked: false).placeBackfill, .unchanged)
     }
