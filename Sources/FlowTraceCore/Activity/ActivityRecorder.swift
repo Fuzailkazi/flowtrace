@@ -44,25 +44,8 @@ public final class ActivityRecorder {
     /// in the order it happened. Serial on purpose: spans are a sequence, and
     /// two of them racing would close the wrong one.
     private let work = DispatchQueue(label: "ai.flowtrace.recorder", qos: .utility)
-
-    /// Set when the recorder is stopping or the app is quitting, so work already
-    /// on the queue drops its write rather than reopening a closed span. Guarded
-    /// by a lock because it is set on the main thread and read on `work`.
-    private let stopLock = NSLock()
-    private nonisolated(unsafe) var _isStopping = false
-
-    private nonisolated var isStopping: Bool {
-        stopLock.lock(); defer { stopLock.unlock() }
-        return _isStopping
-    }
-
-    private nonisolated func markStopping() {
-        stopLock.lock(); _isStopping = true; stopLock.unlock()
-    }
-
-    private nonisolated func clearStopping() {
-        stopLock.lock(); _isStopping = false; stopLock.unlock()
-    }
+    private let writeGate = RecorderWriteGate()
+    private var runToken: UInt64 = 0
 
     /// When the recorder last knew the machine was alive. Read at launch to
     /// close a span a crash left open, since a crash writes nothing.
@@ -94,7 +77,7 @@ public final class ActivityRecorder {
         #if canImport(AppKit)
         guard !isRunning else { return }
         isRunning = true
-        clearStopping()
+        runToken = writeGate.start()
 
         let workspace = NSWorkspace.shared.notificationCenter
         observe(workspace, NSWorkspace.didActivateApplicationNotification) { [weak self] _ in
@@ -173,6 +156,8 @@ public final class ActivityRecorder {
         let wantsTitle = captureWindowTitles
         let wantsTabs = captureBrowserTabs
         let store = self.store
+        let writeGate = self.writeGate
+        let runToken = self.runToken
 
         // One serial queue, so spans are written in the order they happened.
         // Two app switches a moment apart must not race each other into the
@@ -211,13 +196,12 @@ public final class ActivityRecorder {
                 }
             }
 
-            // Recording was switched off, or the app is quitting, while this was
-            // being enriched. Opening a span now would leave one behind after
-            // the close that has already happened.
-            guard self?.isStopping != true else { return }
-
             do {
-                try store.beginActivity(event)
+                // Stop cannot land between this check and the write. If Stop
+                // wins first, the old run is refused even after a new start.
+                guard try writeGate.performIfCurrent(runToken, {
+                    try store.beginActivity(event)
+                }) else { return }
             } catch {
                 Diagnostics.log("activity: writing a span failed: \(error)")
             }
@@ -296,10 +280,14 @@ public final class ActivityRecorder {
     /// ending on a span nothing ever closed.
     private func closeSpan() {
         let store = self.store
+        let writeGate = self.writeGate
+        let runToken = self.runToken
         let at = Date()
         work.async {
             do {
-                try store.endOpenActivity(at: at)
+                try writeGate.performIfCurrent(runToken) {
+                    try store.endOpenActivity(at: at)
+                }
             } catch {
                 Diagnostics.log("activity: closing the open span failed: \(error)")
             }
@@ -310,11 +298,11 @@ public final class ActivityRecorder {
     ///
     /// Written directly rather than queued: at termination the process may not
     /// live long enough to drain the queue, and waiting for it would mean
-    /// waiting on an Apple Event to a browser that may be wedged. `isStopping`
-    /// makes any in-flight enrichment drop its write instead, so nothing can
-    /// open a span after this closes one.
+    /// waiting on an Apple Event to a browser that may be wedged. The gate
+    /// invalidates any in-flight enrichment and waits for a write
+    /// that already entered its short database section before closing it.
     private func closeSpanNow() {
-        markStopping()
+        writeGate.stop()
         do {
             try store.endOpenActivity(at: Date())
         } catch {

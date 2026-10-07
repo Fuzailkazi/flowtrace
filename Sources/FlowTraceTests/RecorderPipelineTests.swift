@@ -1,5 +1,5 @@
 import Foundation
-import FlowTraceCore
+@testable import FlowTraceCore
 
 /// The recorder no longer writes spans on the main thread: the window-title
 /// read, the browser's Apple Event and the database write all happen on one
@@ -19,6 +19,33 @@ func runRecorderPipelineTests() {
             kind: .app, startedAt: at(minutes), appName: app,
             bundleIdentifier: "com.example.\(app.lowercased())", target: target
         )
+    }
+
+    TestKit.test("stopped and restarted recording refuses writes from the old run") {
+        let store = try store()
+        let gate = RecorderWriteGate()
+        let firstRun = gate.start()
+        expect(try gate.performIfCurrent(firstRun) {
+            try store.beginActivity(event("VS Code", at: 0))
+        })
+
+        gate.stop()
+        try store.endOpenActivity(at: at(5))
+        expect(try !gate.performIfCurrent(firstRun) {
+            try store.beginActivity(event("Late browser", at: 6))
+        }, "a queued write cannot reopen the span after Stop")
+        expect(try store.openActivity() == nil, "nothing was reopened")
+
+        let secondRun = gate.start()
+        expect(try !gate.performIfCurrent(firstRun) {
+            try store.beginActivity(event("Old run", at: 7))
+        }, "restarting cannot admit an old queued write")
+        expect(try gate.performIfCurrent(secondRun) {
+            try store.beginActivity(event("New run", at: 8))
+        })
+        expectEqual(try store.openActivity()?.appName, "New run")
+        expectEqual(try store.allActivity(on: base, minimumSeconds: 0).map(\.appName),
+                    ["VS Code", "New run"])
     }
 
     // The reason the queue is serial. Two app switches a moment apart used to be
