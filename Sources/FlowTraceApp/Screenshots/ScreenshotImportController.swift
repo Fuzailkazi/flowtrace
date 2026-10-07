@@ -6,6 +6,14 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class ScreenshotImportController {
+    private enum ImportError: LocalizedError {
+        case emptyClipboard
+
+        var errorDescription: String? {
+            "The clipboard has no image. Copy an image, then try Paste screenshot again."
+        }
+    }
+
     var isImporting = false
     var error: String?
     var success: String?
@@ -20,14 +28,15 @@ final class ScreenshotImportController {
     }
 
     func paste(into model: AppModel) {
-        guard let data = NSPasteboard.general.data(forType: .png)
-            ?? NSPasteboard.general.data(forType: .tiff)
-            ?? NSPasteboard.general.data(forType: .init("public.jpeg"))
-        else {
-            error = "The clipboard has no image. Copy an image, then try Paste screenshot again."
-            return
+        importImage(into: model) {
+            guard let data = NSPasteboard.general.data(forType: .png)
+                ?? NSPasteboard.general.data(forType: .tiff)
+                ?? NSPasteboard.general.data(forType: .init("public.jpeg"))
+            else {
+                throw ImportError.emptyClipboard
+            }
+            return data
         }
-        importImage(into: model) { data }
     }
 
     private func importImage(into model: AppModel, read: @escaping @Sendable () throws -> Data) {
@@ -38,7 +47,9 @@ final class ScreenshotImportController {
         let store = model.store
         Task.detached(priority: .userInitiated) {
             let result = Result {
-                let processed = try ScreenshotImageProcessor.process(read())
+                let input = try read()
+                guard input.count <= 25_000_000 else { throw ScreenshotImageError.inputTooLarge }
+                let processed = try ScreenshotImageProcessor.process(input)
                 return try store.createScreenshot(imageData: processed.imageData,
                     thumbnailData: processed.thumbnailData, ocrText: processed.ocrText,
                     ocrStatus: processed.ocrStatus)
