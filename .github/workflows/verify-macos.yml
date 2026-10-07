@@ -1,0 +1,28 @@
+name: Verify macOS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Show Swift version
+        run: swift --version
+      - name: Run FlowTrace tests
+        run: ./Scripts/test.sh
+      - name: Build and verify internal app bundle
+        run: FLOWTRACE_DIST_DIR="$RUNNER_TEMP/flowtrace-dist" ./Scripts/bundle.sh release
