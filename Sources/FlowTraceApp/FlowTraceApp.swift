@@ -206,6 +206,7 @@ struct RootView: View {
                 case "now": model.route = .now
                 case "timeline": model.route = .timeline
                 case "memories": model.route = .memories
+                case "screenshots": model.route = .screenshots
                 case "settings": model.route = .settings
                 case "capture":
                     // Summon the panel a beat after launch, as the key would.
@@ -327,6 +328,7 @@ struct MainWindow: View {
                 Button("Now") { model.route = .now }
                 Button("Timeline") { model.route = .timeline }
                 Button("Memories") { model.route = .memories }
+                Button("Screenshots") { model.route = .screenshots }
                 Divider()
                 Button("Unfinished work") { model.route = .dashboard }
                 Button("All threads") { model.route = .status(.active) }
@@ -359,6 +361,10 @@ struct DetailPane: View {
                 TimelineView(model: model)
             case .memories:
                 MemoriesView(model: model)
+            case .screenshots:
+                ScreenshotLibraryView(model: model)
+            case .screenshot(let id):
+                ScreenshotDetailView(model: model, id: id)
             case .memory(let id):
                 MemoryDetailView(model: model, eventId: id)
             case .place(let path):

@@ -22,6 +22,8 @@ enum Route: Hashable {
     case status(ThreadStatus)
     case thread(String)
     case recentCaptures
+    case screenshots
+    case screenshot(String)
     case settings
 }
 
