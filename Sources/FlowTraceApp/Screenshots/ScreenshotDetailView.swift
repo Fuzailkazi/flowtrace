@@ -55,13 +55,14 @@ struct ScreenshotDetailView: View {
         .task(id: id) { load() }
     }
 
-    private func load() {
+    private func load(clearError: Bool = true) {
         loadGeneration += 1
         let generation = loadGeneration
         let requestedID = id
         screenshot = nil
         description = ""
-        error = nil
+        busy = false
+        if clearError { error = nil }
         confirmingDelete = false
         let store = model.store
         Task.detached(priority: .userInitiated) {
@@ -115,7 +116,7 @@ struct ScreenshotDetailView: View {
                 if case .failure(let failure) = saved { error = "Could not save recognition result: \(failure.localizedDescription)" }
                 else if case .failure(let failure) = result { error = "Text recognition failed: \(failure.localizedDescription)" }
                 model.activityRevision += 1
-                load()
+                load(clearError: false)
             }
         }
     }
