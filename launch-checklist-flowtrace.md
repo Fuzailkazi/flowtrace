@@ -6,6 +6,8 @@
 
 Build 13 includes the merged recorder Stop/restart write gate from PR #8. Build 12 remains at `/tmp/flowtrace-beta-frozen-86108a/dist/FlowTrace-0.1.1-build12-macOS.zip` (SHA-256 `4785b1fd36eb3b09987bf8144557ea1113d9ac9f32c1ac3f786e5bd497dcbf15`) as the previous verified internal candidate. It includes the merged recovery-beta preparation, CI workflow, fast editor capture wait, and corrected place-specific capture destination.
 
+**Isolated UI check, 7 October 2026:** A debug app built from the same frozen source with bundle ID `ai.flowtrace.FlowTraceBeta13UITest` and disposable support directory `/tmp/flowtrace-ui13-profile.a97hej` opened its first-run consent screen. Continuing without sources opened Now without enabling transcript reads. Quick Capture saved a synthetic note, Memories returned one match for its search terms, and opening that result showed the note in its detail. macOS Accessibility access was absent, so the capture correctly said that no window title was available. The app exited after the check. This is partial fresh-profile evidence; it does **not** complete the exact build 13 release-app or clean-account walkthroughs below.
+
 Earlier ad-hoc candidates were built from a dirty working tree. Builds 3 through 13 came from committed source. Build 13 excludes a pre-existing clickable-title edit still present in the primary working tree; that separate edit is not in this archive.
 
 ## Before inviting participants (T-2w to T-1d)
