@@ -35,7 +35,7 @@ text and metadata only. FlowTrace does not require an account or a cloud backend
 3. Unzip it and move `FlowTrace.app` to `/Applications`.
 4. Open FlowTrace from Applications.
 
-The current release is ad-hoc signed for local distribution. If macOS blocks the
+The published test build is ad-hoc signed for local distribution. If macOS blocks the
 first launch, right-click `FlowTrace.app`, choose **Open**, and confirm. If macOS
 still reports that the app cannot be opened, run:
 
@@ -43,8 +43,8 @@ still reports that the app cannot be opened, run:
 xattr -dr com.apple.quarantine /Applications/FlowTrace.app
 ```
 
-Then open FlowTrace again. This is an older technical test build, and its features may
-differ from this source. A new release needs full screenshot validation, a clean-account
+Then open FlowTrace again. This older technical test build does not include screenshot
+recall. A new release needs full screenshot validation, a clean-account
 walkthrough, Developer ID signing, and notarization before it is ready to share.
 
 ### Build it yourself
