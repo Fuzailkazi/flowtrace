@@ -166,7 +166,7 @@ struct QuickCaptureView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     Circle().fill(Journal.pen).frame(width: 7, height: 7)
-                    Text(resolved.place?.name ?? resolved.summary)
+                    Text(resolved.destinationPlace?.name ?? resolved.summary)
                         .font(.mono(11.5, weight: .semibold))
                         .foregroundStyle(Color(white: 0.9))
                         .lineLimit(1)
@@ -207,7 +207,7 @@ struct QuickCaptureView: View {
                             .foregroundStyle(Color(white: 0.6))
                             .lineLimit(1)
                             .truncationMode(.middle)
-                    } else if let place = resolved.place {
+                    } else if let place = resolved.destinationPlace {
                         Text(place.root.abbreviatingHome)
                             .font(.mono(11))
                             .foregroundStyle(Color(white: 0.6))
@@ -238,7 +238,7 @@ struct QuickCaptureView: View {
             // Keep the destination visible without repeating the app identity
             // already established in the panel title bar and context header.
             HStack(spacing: 8) {
-                if let place = resolved.place {
+                if let place = resolved.destinationPlace {
                     Circle().fill(Journal.pen).frame(width: 6, height: 6)
                     Text(place.name)
                         .font(.mono(10.5))
@@ -372,7 +372,7 @@ struct QuickCaptureView: View {
             // Where the note will be filed, as the design's project chip.
             HStack(spacing: 6) {
                 Circle().fill(Journal.pen).frame(width: 7, height: 7)
-                if let place = resolved.place {
+                if let place = resolved.destinationPlace {
                     Text("Project: \(place.name)")
                 } else {
                     Text(resolved.appName)
@@ -495,11 +495,11 @@ struct QuickCaptureView: View {
     /// whether or not a `ProjectNote` exists for it: this is a single best guess,
     /// not a search across every project mentioned in the last 20 minutes.
     private func projectNoteCandidate() -> String? {
-        // The editor's answer for right now beats a cwd left on a row by an
+        // The place the user is looking at beats a cwd left on a row by an
         // earlier capture in another project. The open VS Code span outlives
         // the project it was noted in, so without this the top-priority
         // suggestion would be an hour-old project's "what am I building".
-        let cwd = resolved.place?.root
+        let cwd = resolved.destinationPlace?.root
             ?? current?.metadata["cwd"]
             ?? leadingUp.compactMap { $0.metadata["cwd"] }.first
         guard let cwd, !cwd.isEmpty else { return nil }

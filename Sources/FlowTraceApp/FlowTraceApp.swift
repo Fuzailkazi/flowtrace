@@ -230,6 +230,12 @@ struct RootView: View {
                         if thenCapture {
                             Task { @MainActor in
                                 try? await Task.sleep(for: .seconds(1.5))
+                                // This development route stands in for a key
+                                // pressed while the workspace is foreground.
+                                // Without activation it captures whichever app
+                                // happened to be frontmost before this launch.
+                                NSApp.activate(ignoringOtherApps: true)
+                                try? await Task.sleep(for: .milliseconds(200))
                                 NotificationCenter.default.post(
                                     name: .flowtraceQuickCapture, object: nil
                                 )

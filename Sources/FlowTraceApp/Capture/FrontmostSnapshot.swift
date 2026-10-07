@@ -49,6 +49,10 @@ struct FrontmostSnapshot: Equatable {
     /// pipeline: it lands in `site` exactly where an editor's project lands.
     var recalledPlace: Place?
 
+    /// The project this capture belongs to, whether an editor reported it or
+    /// the user opened it inside FlowTrace.
+    var destinationPlace: Place? { recalledPlace ?? place }
+
     /// The app is a browser we know how to talk to, whether or not we managed to.
     var isBrowser: Bool {
         url != nil || automationDenied || matchedBrowser != nil
@@ -146,8 +150,8 @@ struct FrontmostSnapshot: Equatable {
             // The recalled place takes precedence over anything an editor said,
             // for the same reason it wins the summary: it is what the user is
             // actually looking at.
-            placeName: (recalledPlace ?? place)?.name,
-            placeRoot: (recalledPlace ?? place)?.root,
+            placeName: destinationPlace?.name,
+            placeRoot: destinationPlace?.root,
             // Whether the app is one we could have asked at all. Without it a
             // capture with no place could not be told apart from a capture that
             // was never entitled to one, and every browser note would clear the
