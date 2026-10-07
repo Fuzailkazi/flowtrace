@@ -596,7 +596,8 @@ struct QuickCaptureView: View {
                     }
                     recomputeSuggestion(tabNote: tabNote)
                 }
-                // Everything the note's destination depends on is now known.
+                // Browser destination is known. An editor place resolves in
+                // its separate task below.
                 enrichmentFinished = true
             }
 
@@ -672,7 +673,7 @@ struct QuickCaptureView: View {
 
         Task { @MainActor in
             defer { saving = false }
-            await waitForTab()
+            await waitForDestination()
             // The recorder writes spans off the main thread now. If the key was
             // pressed moments after switching apps, its span for where you are
             // may still be in flight — planning against the database before it
@@ -703,14 +704,27 @@ struct QuickCaptureView: View {
         }
     }
 
-    /// Waits for the tab to be identified, but not for long.
+    /// Waits briefly for the destination to be identified.
     ///
-    /// A one-word note and a fast Return can beat the AppleScript round trip,
-    /// and saving before the tab is known files the note on the page you left.
-    /// A polled flag rather than awaiting the task: the read is a synchronous
-    /// Apple Event whose own timeout is two minutes, so there is nothing to
-    /// cancel and nothing that would return early.
-    private func waitForTab() async {
+    /// A one-word note and a fast Return can beat the editor's focus-loss
+    /// write or the browser's AppleScript round trip. Saving before either
+    /// result may file the note without its intended project or tab.
+    /// Poll the two completion flags: the browser read is a synchronous Apple
+    /// Event whose own timeout is two minutes, so awaiting that task could hold
+    /// a note much longer than the panel should.
+    private func waitForDestination() async {
+        if EditorFamily.matching(bundleIdentifier: snapshot.bundleIdentifier) != nil,
+           !resolved.placeChecked {
+            // EditorPlace waits up to 400 ms for the editor's focus-loss write.
+            // A fast Return must give that lookup a chance to attach the note
+            // to the project the user actually had open.
+            let placeDeadline = ContinuousClock.now + .milliseconds(500)
+            while !resolved.placeChecked, !Task.isCancelled,
+                  ContinuousClock.now < placeDeadline {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+
         guard !enrichmentFinished else { return }
         let deadline = ContinuousClock.now + .seconds(1.5)
         // The sleep is `try?`, so without the cancellation check a cancelled task
