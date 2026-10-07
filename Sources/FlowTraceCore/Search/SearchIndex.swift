@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 public enum SearchKind: String, Codable, Sendable {
-    case thread, tab, code, note
+    case thread, tab, code, note, screenshot
     /// A note the user wrote on something they were doing. What the Memories
     /// screen shows, and the thing people mean when they say "my notes".
     case memory
@@ -15,7 +15,7 @@ public enum SearchKind: String, Codable, Sendable {
     public var navigatesByThread: Bool {
         switch self {
         case .thread, .tab, .code, .note: true
-        case .memory, .place: false
+        case .memory, .place, .screenshot: false
         }
     }
 }
@@ -107,12 +107,16 @@ public enum SearchIndex {
         try search(db, query: query, limit: limit, onlyMemories: true)
     }
 
+    public static func searchScreenshots(_ db: Database, query: String, limit: Int = 50) throws -> [SearchHit] {
+        try search(db, query: query, limit: limit, onlyMemories: false, onlyScreenshots: true)
+    }
+
     private static func search(
-        _ db: Database, query: String, limit: Int, onlyMemories: Bool
+        _ db: Database, query: String, limit: Int, onlyMemories: Bool, onlyScreenshots: Bool = false
     ) throws -> [SearchHit] {
         let terms = searchTerms(in: query)
         guard !terms.isEmpty else { return [] }
-        let scope = onlyMemories ? "AND kind IN ('memory', 'place')" : ""
+        let scope = onlyScreenshots ? "AND kind = 'screenshot'" : (onlyMemories ? "AND kind IN ('memory', 'place')" : "")
 
         let complete = try rankedMatches(
             db, expression: ftsExpression(tokens: terms, joiningWith: " AND "),
@@ -132,7 +136,7 @@ public enum SearchIndex {
 
         // A prefix match can still miss a substring inside one word ("code"
         // inside "OpenCode"). Try the literal phrase as a last resort.
-        return try substringFallback(db, query: query, limit: limit, onlyMemories: onlyMemories)
+        return try substringFallback(db, query: query, limit: limit, scope: scope)
     }
 
     private static func rankedMatches(
@@ -166,10 +170,9 @@ public enum SearchIndex {
     }
 
     private static func substringFallback(
-        _ db: Database, query: String, limit: Int, onlyMemories: Bool
+        _ db: Database, query: String, limit: Int, scope: String
     ) throws -> [SearchHit] {
         let literal = query.trimmingCharacters(in: .whitespaces)
-        let scope = onlyMemories ? "AND kind IN ('memory', 'place')" : ""
         let rows = try Row.fetchAll(db, sql: """
             SELECT kind, recordId, threadId, title, body
             FROM searchIndex

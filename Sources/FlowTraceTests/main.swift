@@ -16,6 +16,7 @@ try? FileManager.default.createDirectory(
 runAdapterTests(fixtures: fixtures)
 runEditorPlaceTests(fixtures: fixtures)
 runStoreTests()
+runScreenshotTests()
 runSearchTests()
 runMemorySearchTests()
 runDetectorTests()
