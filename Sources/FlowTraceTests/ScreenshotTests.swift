@@ -76,6 +76,33 @@ func runScreenshotTests() {
         expectEqual(try store.search("Disposable").count, 0)
     }
 
+    TestKit.test("exports recoverable screenshots and counts them in holdings") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let image = Data([0, 1, 2, 253, 254, 255])
+        let saved = try store.createScreenshot(imageData: image, thumbnailData: Data([9]),
+            description: "Diagram", ocrText: "secret diagram text", ocrStatus: .succeeded)
+        let holdings = try store.holdings()
+        expectEqual(holdings.screenshots, 1)
+        expectEqual(holdings.isEmpty, false)
+
+        let json = try store.exportJSON()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ExportBundle.self, from: json)
+        expectEqual(decoded.screenshots.first?.id, saved.id)
+        expectEqual(decoded.screenshots.first?.imageData, image)
+        expectEqual(decoded.screenshots.first?.ocrText, "secret diagram text")
+        let markdown = try store.exportMarkdown()
+        expectContains(markdown, "secret diagram text")
+        expectContains(markdown, "Image bytes are included in the JSON export")
+        expectNotContains(markdown, image.base64EncodedString())
+
+        try store.deleteAllData()
+        expectEqual(try store.holdings().screenshots, 0)
+        expectEqual(try store.search("secret diagram text").count, 0)
+        expectNil(try store.screenshot(id: saved.id))
+    }
+
     TestKit.test("processor rejects unreadable, oversized, and excessive pixel images") {
         do {
             _ = try ScreenshotImageProcessor.process(Data([1, 2, 3]))

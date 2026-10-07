@@ -9,6 +9,17 @@ public struct ExportBundle: Codable, Sendable {
     public var codeContexts: [CodeContext]
     public var notes: [Note]
     public var timeline: [TimelineEvent]
+    public var screenshots: [ScreenshotExport]
+}
+
+public struct ScreenshotExport: Codable, Sendable {
+    public let id: String
+    public let importedAt: Date
+    public let description: String
+    public let ocrText: String
+    public let ocrStatus: ScreenshotOCRStatus
+    public let imageMIMEType: String
+    public let imageData: Data
 }
 
 extension Store {
@@ -24,16 +35,66 @@ extension Store {
                 browserContexts: try BrowserContext.fetchAll(db),
                 codeContexts: try CodeContext.fetchAll(db),
                 notes: try Note.fetchAll(db),
-                timeline: try TimelineEvent.fetchAll(db)
+                timeline: try TimelineEvent.fetchAll(db),
+                screenshots: []
             )
         }
     }
 
+    /// Writes a complete JSON export one screenshot at a time. At most one
+    /// image and its base64 encoding are held in memory during the image pass.
+    public func exportJSON(to destination: URL) throws {
+        let temporary = destination.deletingLastPathComponent()
+            .appendingPathComponent(".flowtrace-export-\(UUID().uuidString).tmp")
+        FileManager.default.createFile(atPath: temporary.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: temporary)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            encoder.dateEncodingStrategy = .iso8601
+            let base = try encoder.encode(exportAll())
+            // Replace the empty screenshot array with an incrementally written one.
+            let marker = Data("\"screenshots\":[]".utf8)
+            guard let range = base.range(of: marker) else { throw ExportError.invalidEnvelope }
+            try handle.write(contentsOf: base[..<range.lowerBound])
+            try handle.write(contentsOf: Data("\"screenshots\":[".utf8))
+            var first = true
+            let count = try screenshotCount()
+            for offset in stride(from: 0, to: count, by: 25) {
+                let page = try screenshots(limit: 25, offset: offset)
+                for metadata in page {
+                    guard let item = try screenshot(id: metadata.id) else { continue }
+                    if !first { try handle.write(contentsOf: Data(",".utf8)) }
+                    first = false
+                    let entry = ScreenshotExport(id: item.id, importedAt: item.importedAt,
+                        description: item.description, ocrText: item.ocrText,
+                        ocrStatus: item.ocrStatus, imageMIMEType: item.imageMIMEType,
+                        imageData: item.imageData)
+                    try handle.write(contentsOf: encoder.encode(entry))
+                }
+            }
+            try handle.write(contentsOf: Data("]".utf8))
+            try handle.write(contentsOf: base[range.upperBound...])
+            try handle.close()
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+            } else {
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            }
+        } catch {
+            try? handle.close()
+            try? FileManager.default.removeItem(at: temporary)
+            throw error
+        }
+    }
+
+    public enum ExportError: Error { case invalidEnvelope }
+
     public func exportJSON() throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(exportAll())
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("flowtrace-export-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try exportJSON(to: url)
+        return try Data(contentsOf: url)
     }
 
     /// A readable Markdown rendering, for keeping outside FlowTrace.
@@ -84,6 +145,21 @@ extension Store {
                     out += "- \(note.isDecision ? "**Decision:** " : "")\(note.content)\n"
                 }
                 out += "\n"
+            }
+        }
+        let count = try screenshotCount()
+        if count > 0 {
+            out += "## Screenshots\n\n"
+            out += "Image bytes are included in the JSON export; this Markdown export contains text only.\n\n"
+            for offset in stride(from: 0, to: count, by: 50) {
+                for item in try screenshots(limit: 50, offset: offset) {
+                    out += "### Screenshot \(item.id)\n\n"
+                    out += "- **Imported:** \(formatter.string(from: item.importedAt))\n"
+                    out += "- **Description:** \(item.description)\n"
+                    out += "- **OCR status:** \(item.ocrStatus.rawValue)\n"
+                    out += "- **Image type:** \(item.imageMIMEType)\n"
+                    out += "- **Recognized text:** \(item.ocrText)\n\n"
+                }
             }
         }
         return out
@@ -167,6 +243,7 @@ extension Store {
         public var pagesVisited: Int
         public var agentSessions: Int
         public var projectNotes: Int
+        public var screenshots: Int
         /// Sessions FlowTrace has parsed and memoised so a rescan is fast. Held,
         /// so it is counted — it used to be invisible here and untouched by
         /// every delete control on the screen.
@@ -178,7 +255,7 @@ extension Store {
 
         public var isEmpty: Bool {
             writtenNotes + rawActivity + pagesVisited
-                + agentSessions + projectNotes + parsedTranscripts == 0
+                + agentSessions + projectNotes + screenshots + parsedTranscripts == 0
         }
 
         /// The log's size in the same shape as the database's.
@@ -211,6 +288,7 @@ extension Store {
                 agentSessions: try Int.fetchOne(db, sql:
                     "SELECT count(*) FROM activityEvent WHERE kind = 'agentSession'") ?? 0,
                 projectNotes: try ProjectNote.fetchCount(db),
+                screenshots: try Int.fetchOne(db, sql: "SELECT count(*) FROM screenshotMemory") ?? 0,
                 parsedTranscripts: try Int.fetchOne(db, sql:
                     "SELECT count(*) FROM scanCache") ?? 0,
                 fileSizeBytes: size,

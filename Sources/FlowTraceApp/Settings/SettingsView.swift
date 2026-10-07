@@ -732,6 +732,10 @@ struct SettingsView: View {
                                 "Read from transcripts your agents wrote."
                             )
                             holdingRow(
+                                "Screenshots", holdings.screenshots,
+                                "Images you chose to save, with local recognized text."
+                            )
+                            holdingRow(
                                 "Project notes", holdings.projectNotes,
                                 "What you said you were building, per repository."
                             )
@@ -798,7 +802,7 @@ struct SettingsView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Your saved activity and notes live in a local database. The controls above also clear FlowTrace's log and server token.")
+                        Text("Your saved screenshots, activity, and notes live in a local database without encryption. JSON export includes screenshot images; Markdown contains text only. The controls above also clear FlowTrace's log and server token.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                         HStack(spacing: Theme.Space.s) {
                             Text(FlowTraceDatabase.defaultURL.path)
@@ -898,14 +902,18 @@ struct SettingsView: View {
         panel.nameFieldStringValue = markdown ? "flowtrace-export.md" : "flowtrace-export.json"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let data = markdown
-                ? Data(try model.store.exportMarkdown().utf8)
-                : try model.store.exportJSON()
-            try data.write(to: url)
-            model.toast = Toast(message: "Exported to \(url.lastPathComponent)")
-        } catch {
-            model.toast = Toast(message: "Export failed: \(error.localizedDescription)", isError: true)
+        let store = model.store
+        Task.detached(priority: .userInitiated) {
+            do {
+                if markdown {
+                    try Data(store.exportMarkdown().utf8).write(to: url, options: .atomic)
+                } else {
+                    try store.exportJSON(to: url)
+                }
+                await MainActor.run { model.toast = Toast(message: "Exported to \(url.lastPathComponent)") }
+            } catch {
+                await MainActor.run { model.toast = Toast(message: "Export failed: \(error.localizedDescription)", isError: true) }
+            }
         }
     }
 
