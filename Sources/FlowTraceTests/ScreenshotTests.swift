@@ -108,6 +108,17 @@ func runScreenshotTests() {
         expectNotNil(CGImageSourceCreateImageAtIndex(thumbSource, 0, nil))
     }
 
+    TestKit.test("OCR retry validates bytes and pixels before decoding") {
+        do {
+            _ = try ScreenshotImageProcessor.recognizeText(in: Data(repeating: 0, count: 25_000_001))
+            expect(false, "oversized retry data must fail")
+        } catch ScreenshotImageError.inputTooLarge { }
+        do {
+            _ = try ScreenshotImageProcessor.recognizeText(in: screenshotTestImage(width: 4097, height: 4097))
+            expect(false, "excessive retry pixels must fail")
+        } catch ScreenshotImageError.tooManyPixels { }
+    }
+
     TestKit.test("recognized screenshot text is searchable") {
         let processed = try ScreenshotImageProcessor.process(screenshotTestImage(width: 800, height: 300, text: "FLOWTRACE 7392"))
         expectEqual(processed.ocrStatus, .succeeded)

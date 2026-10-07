@@ -34,15 +34,7 @@ public enum ScreenshotImageProcessor {
     private static let thumbnailLimit = 128_000
 
     public static func process(_ input: Data) throws -> ProcessedScreenshot {
-        guard !input.isEmpty else { throw ScreenshotImageError.invalidImage }
-        guard input.count <= inputLimit else { throw ScreenshotImageError.inputTooLarge }
-        guard let source = CGImageSourceCreateWithData(input as CFData, nil),
-              CGImageSourceGetCount(source) > 0,
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0 else { throw ScreenshotImageError.invalidImage }
-        guard width <= pixelLimit / height else { throw ScreenshotImageError.tooManyPixels }
+        let (source, width, height) = try validatedSource(input)
 
         let maxDimension = min(4096, max(width, height))
         let options: [CFString: Any] = [
@@ -69,8 +61,8 @@ public enum ScreenshotImageProcessor {
     }
 
     public static func recognizeText(in normalizedJPEG: Data) throws -> String {
-        guard let source = CGImageSourceCreateWithData(normalizedJPEG as CFData, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        let (source, _, _) = try validatedSource(normalizedJPEG)
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw ScreenshotImageError.invalidImage
         }
         let request = VNRecognizeTextRequest()
@@ -79,6 +71,19 @@ public enum ScreenshotImageProcessor {
         try VNImageRequestHandler(cgImage: image).perform([request])
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
             .joined(separator: "\n")
+    }
+
+    private static func validatedSource(_ input: Data) throws -> (CGImageSource, Int, Int) {
+        guard !input.isEmpty else { throw ScreenshotImageError.invalidImage }
+        guard input.count <= inputLimit else { throw ScreenshotImageError.inputTooLarge }
+        guard let source = CGImageSourceCreateWithData(input as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0 else { throw ScreenshotImageError.invalidImage }
+        guard width <= pixelLimit / height else { throw ScreenshotImageError.tooManyPixels }
+        return (source, width, height)
     }
 
     private static func flatten(_ image: CGImage) -> CGImage? {
