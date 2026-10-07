@@ -30,12 +30,14 @@ public enum ScreenshotStoreError: Error, LocalizedError {
     case invalidImage
     case imageTooLarge
     case thumbnailTooLarge
+    case invalidOCRStatus
 
     public var errorDescription: String? {
         switch self {
         case .invalidImage: "The processed JPEG or thumbnail is empty."
         case .imageTooLarge: "The processed JPEG exceeds 10 MB."
         case .thumbnailTooLarge: "The screenshot thumbnail exceeds 128 KB."
+        case .invalidOCRStatus: "The screenshot has an unrecognized OCR status."
         }
     }
 }
@@ -74,14 +76,14 @@ extension Store {
             try Row.fetchAll(db, sql: """
                 SELECT \(Self.metadataColumns) FROM screenshotMemory
                 ORDER BY importedAt DESC, id DESC LIMIT ? OFFSET ?
-                """, arguments: [max(0, limit), max(0, offset)]).map(Self.metadata)
+                """, arguments: [max(0, limit), max(0, offset)]).map { try Self.metadata($0) }
         }
     }
 
     public func screenshot(id: String) throws -> ScreenshotMemory? {
         try database.writer.read { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM screenshotMemory WHERE id = ?", arguments: [id]) else { return nil }
-            let info = Self.metadata(row)
+            let info = try Self.metadata(row)
             return ScreenshotMemory(id: info.id, importedAt: info.importedAt,
                                     description: info.description, ocrText: info.ocrText,
                                     ocrStatus: info.ocrStatus, imageMIMEType: info.imageMIMEType,
@@ -90,15 +92,17 @@ extension Store {
     }
 
     public func searchScreenshots(query: String, limit: Int = 50, offset: Int = 0) throws -> [ScreenshotMetadata] {
-        let ids = try database.writer.read { db in
-            try SearchIndex.searchScreenshots(db, query: query, limit: max(0, limit) + max(0, offset))
-                .map(\.recordId)
-        }
-        let page = Array(ids.dropFirst(max(0, offset)).prefix(max(0, limit)))
-        guard !page.isEmpty else { return [] }
+        let pageLimit = max(0, limit)
+        let pageOffset = max(0, offset)
+        guard pageLimit > 0 else { return [] }
+        let (sum, overflow) = pageLimit.addingReportingOverflow(pageOffset)
+        let searchLimit = overflow ? Int.max : sum
         return try database.writer.read { db in
-            try page.compactMap { id in
-                try Row.fetchOne(db, sql: "SELECT \(Self.metadataColumns) FROM screenshotMemory WHERE id = ?", arguments: [id]).map(Self.metadata)
+            let ids = try SearchIndex.searchScreenshots(db, query: query, limit: searchLimit)
+                .map(\.recordId)
+            let page = ids.dropFirst(pageOffset).prefix(pageLimit)
+            return try page.compactMap { id in
+                try Row.fetchOne(db, sql: "SELECT \(Self.metadataColumns) FROM screenshotMemory WHERE id = ?", arguments: [id]).map { try Self.metadata($0) }
             }
         }
     }
@@ -131,10 +135,12 @@ extension Store {
         }
     }
 
-    private static func metadata(_ row: Row) -> ScreenshotMetadata {
-        ScreenshotMetadata(id: row["id"], importedAt: row["importedAt"],
+    private static func metadata(_ row: Row) throws -> ScreenshotMetadata {
+        let rawStatus: String = row["ocrStatus"]
+        guard let status = ScreenshotOCRStatus(rawValue: rawStatus) else { throw ScreenshotStoreError.invalidOCRStatus }
+        return ScreenshotMetadata(id: row["id"], importedAt: row["importedAt"],
                            description: row["description"], ocrText: row["ocrText"],
-                           ocrStatus: ScreenshotOCRStatus(rawValue: row["ocrStatus"]) ?? .failed,
+                           ocrStatus: status,
                            imageMIMEType: row["imageMIMEType"], thumbnailData: row["thumbnailData"])
     }
 

@@ -41,6 +41,7 @@ func runScreenshotTests() {
         }
         expectEqual(try store.screenshots(limit: 2).count, 2)
         expectEqual(try store.screenshots(limit: 2, offset: 2).count, 1)
+        expectEqual(try store.searchScreenshots(query: "Page", limit: Int.max, offset: Int.max).count, 0)
         expectEqual(Mirror(reflecting: try unwrap(store.screenshots().first)).children.map(\.label).contains("imageData"), false)
         expectEqual(try store.screenshotCount(), 3)
     }
