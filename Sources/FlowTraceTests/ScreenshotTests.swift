@@ -61,4 +61,14 @@ func runScreenshotTests() {
             expect(false, "oversized image must fail")
         } catch is ScreenshotStoreError { }
     }
+
+    TestKit.test("delete all data removes screenshot bytes and index entries") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let saved = try store.createScreenshot(imageData: Data([1, 2]), thumbnailData: Data([3]),
+                                               description: "Disposable drawing")
+        try store.deleteAllData()
+        expectEqual(try store.screenshotCount(), 0)
+        expectNil(try store.screenshot(id: saved.id))
+        expectEqual(try store.search("Disposable").count, 0)
+    }
 }
