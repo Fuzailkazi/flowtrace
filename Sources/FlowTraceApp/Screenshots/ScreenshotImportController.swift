@@ -24,7 +24,14 @@ final class ScreenshotImportController {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        importImage(into: model) { try Data(contentsOf: url, options: .mappedIfSafe) }
+        importImage(into: model) {
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            guard let size = attributes[.size] as? NSNumber,
+                  size.int64Value <= 25_000_000 else {
+                throw ScreenshotImageError.inputTooLarge
+            }
+            return try Data(contentsOf: url, options: .mappedIfSafe)
+        }
     }
 
     func paste(into model: AppModel) {

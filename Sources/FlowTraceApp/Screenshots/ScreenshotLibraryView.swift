@@ -29,7 +29,10 @@ struct ScreenshotLibraryView: View {
                 if let message = importer.success { Text(message).foregroundStyle(.secondary) }
                 TextField("Search screenshots", text: $query)
                     .textFieldStyle(.roundedBorder)
-                if let error { Text("Could not load screenshots: \(error)").foregroundStyle(.red) }
+                if let error {
+                    Text("Could not load screenshots: \(error)").foregroundStyle(.red)
+                    Button("Retry") { load(reset: rows.isEmpty) }
+                }
                 if rows.isEmpty && !loading && error == nil {
                     ContentUnavailableView(query.isEmpty ? "No screenshots yet" : "No matches", systemImage: "photo.stack", description: Text(query.isEmpty ? "Import an image or paste one from the clipboard." : "Try different words from the image or its description."))
                 }

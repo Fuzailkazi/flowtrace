@@ -10,6 +10,7 @@ struct ScreenshotDetailView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirmingDelete = false
+    @State private var loadGeneration = 0
 
     var body: some View {
         ScrollView {
@@ -55,10 +56,18 @@ struct ScreenshotDetailView: View {
     }
 
     private func load() {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let requestedID = id
+        screenshot = nil
+        description = ""
+        error = nil
+        confirmingDelete = false
         let store = model.store
         Task.detached(priority: .userInitiated) {
-            let result = Result { try store.screenshot(id: id) }
+            let result = Result { try store.screenshot(id: requestedID) }
             await MainActor.run {
+                guard generation == loadGeneration, requestedID == id else { return }
                 switch result {
                 case .success(let value):
                     screenshot = value
@@ -71,6 +80,7 @@ struct ScreenshotDetailView: View {
     }
 
     private func saveDescription() {
+        guard screenshot?.id == id else { return }
         let store = model.store
         let value = description
         busy = true
@@ -78,6 +88,7 @@ struct ScreenshotDetailView: View {
         Task.detached(priority: .userInitiated) {
             let result = Result { try store.updateScreenshotDescription(id: id, description: value) }
             await MainActor.run {
+                guard model.route == .screenshot(id) else { return }
                 busy = false
                 switch result {
                 case .success: model.activityRevision += 1; load()
@@ -88,7 +99,7 @@ struct ScreenshotDetailView: View {
     }
 
     private func retryOCR() {
-        guard let screenshot else { return }
+        guard let screenshot, screenshot.id == id else { return }
         let store = model.store
         let data = screenshot.imageData
         busy = true
@@ -99,6 +110,7 @@ struct ScreenshotDetailView: View {
             let text = (try? result.get()) ?? ""
             let saved = Result { try store.updateScreenshotOCR(id: id, text: text, status: status) }
             await MainActor.run {
+                guard model.route == .screenshot(id) else { return }
                 busy = false
                 if case .failure(let failure) = saved { error = "Could not save recognition result: \(failure.localizedDescription)" }
                 else if case .failure(let failure) = result { error = "Text recognition failed: \(failure.localizedDescription)" }
@@ -109,12 +121,14 @@ struct ScreenshotDetailView: View {
     }
 
     private func delete() {
+        guard screenshot?.id == id else { return }
         let store = model.store
         busy = true
         error = nil
         Task.detached(priority: .userInitiated) {
             let result = Result { try store.deleteScreenshot(id: id) }
             await MainActor.run {
+                guard model.route == .screenshot(id) else { return }
                 busy = false
                 switch result {
                 case .success: model.activityRevision += 1; model.route = .screenshots
