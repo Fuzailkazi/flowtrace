@@ -227,6 +227,20 @@ enum Migrations {
             try MemoryIndexing.indexEverything(db)
         }
 
+        migrator.registerMigration("v9.screenshotMemory") { db in
+            try db.create(table: "screenshotMemory") { t in
+                t.primaryKey("id", .text)
+                t.column("importedAt", .datetime).notNull()
+                t.column("description", .text).notNull().defaults(to: "")
+                t.column("ocrText", .text).notNull().defaults(to: "")
+                t.column("ocrStatus", .text).notNull()
+                t.column("imageMIMEType", .text).notNull()
+                t.column("thumbnailData", .blob).notNull()
+                t.column("imageData", .blob).notNull()
+            }
+            try db.create(index: "idx_screenshot_imported", on: "screenshotMemory", columns: ["importedAt"])
+        }
+
         return migrator
     }
 }

@@ -12,13 +12,14 @@ struct AppSidebar: View {
     @State private var holdingsFailure: String?
 
     private enum Item: Hashable {
-        case now, timeline, memories, settings
+        case now, timeline, memories, screenshots, settings
 
         var title: String {
             switch self {
             case .now: "Now"
             case .timeline: "Timeline"
             case .memories: "Memories"
+            case .screenshots: "Screenshots"
             case .settings: "Settings"
             }
         }
@@ -28,6 +29,7 @@ struct AppSidebar: View {
             case .now: "chevron.backward"
             case .timeline: "clock"
             case .memories: "photo.on.rectangle.angled"
+            case .screenshots: "photo.stack"
             case .settings: "gearshape"
             }
         }
@@ -37,6 +39,7 @@ struct AppSidebar: View {
             case .now: .now
             case .timeline: .timeline
             case .memories: .memories
+            case .screenshots: .screenshots
             case .settings: .settings
             }
         }
@@ -47,6 +50,7 @@ struct AppSidebar: View {
         case .now: .now
         case .timeline: .timeline
         case .memories, .memory: .memories
+        case .screenshots, .screenshot: .screenshots
         case .settings: .settings
         default: nil
         }
@@ -64,6 +68,7 @@ struct AppSidebar: View {
                 row(.now)
                 row(.timeline)
                 row(.memories)
+                row(.screenshots)
             }
             .padding(.horizontal, Journal.Space.m)
 

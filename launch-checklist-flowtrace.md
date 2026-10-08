@@ -2,7 +2,7 @@
 
 **Launch type:** private, observed beta for 8–10 Mac developers using several coding-agent sessions across at least two repositories. **Date:** TBD after the product owner chooses the first problem to prove. **Public release:** separate gate.
 
-**Current internal candidate:** `/tmp/flowtrace-beta-frozen-21a805b.uEUQm5/dist/FlowTrace-0.1.1-build13-macOS.zip` (SHA-256 `98f43627cb713bf659f25ccc905aa7d8fc2c847b36bb213b9bc0e5fb3c329e88`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `13`, built from a clean export of merge commit `21a805b` on `main`. That exact source passed 377 tests and debug/release app builds; the release bundler also built the CLI. The extracted ZIP passed plist and signature-integrity checks, has the production bundle ID, and contains no debug support-directory key. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature, and macOS Gatekeeper rejected the extracted app. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
+**Earlier agent-recovery internal candidate (does not include screenshot recall):** `/tmp/flowtrace-beta-frozen-21a805b.uEUQm5/dist/FlowTrace-0.1.1-build13-macOS.zip` (SHA-256 `98f43627cb713bf659f25ccc905aa7d8fc2c847b36bb213b9bc0e5fb3c329e88`). It contains an ad-hoc signed app with bundle version `0.1.1` and build number `13`, built from a clean export of merge commit `21a805b` on `main`. That exact source passed 377 tests and debug/release app builds; the release bundler also built the CLI. The extracted ZIP passed plist and signature-integrity checks, has the production bundle ID, and contains no debug support-directory key. `verify-public-release.sh` correctly rejected it for lacking a Developer ID signature, and macOS Gatekeeper rejected the extracted app. **This is a reproducible internal artifact, not yet a participant-ready or public download.**
 
 Build 13 includes the merged recorder Stop/restart write gate from PR #8. Build 12 remains at `/tmp/flowtrace-beta-frozen-86108a/dist/FlowTrace-0.1.1-build12-macOS.zip` (SHA-256 `4785b1fd36eb3b09987bf8144557ea1113d9ac9f32c1ac3f786e5bd497dcbf15`) as the previous verified internal candidate. It includes the merged recovery-beta preparation, CI workflow, fast editor capture wait, and corrected place-specific capture destination.
 
@@ -60,3 +60,12 @@ Earlier ad-hoc candidates were built from a dirty working tree. Builds 3 through
 | Engineering | Frozen revision, unique build ID, clean-account results, and archive checksum. | T-1w | Engineering | Open |
 | Research observer | Exact build, session script, privacy boundaries, and failure log. | T-1d | Product owner | Open |
 | Beta participant | Honest install instructions, source choices, and support path. | T-0 | Research observer | Open |
+
+## Screenshot recall candidate gates (2026-10-08)
+
+- [ ] Verify deliberate paste and import, local OCR, text search, image detail, deletion, JSON image recovery, and Markdown text export in a fresh isolated profile.
+- [ ] Confirm no background screenshot capture occurs and the UI explains that local storage is not encrypted.
+- [ ] Run full tests, debug and release builds, then freeze and inspect the exact archive.
+- [ ] Sign with Developer ID, notarize, and verify installation and permissions in a clean macOS account.
+
+No screenshot-recall archive is ready to share.

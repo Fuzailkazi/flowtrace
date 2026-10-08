@@ -22,6 +22,8 @@ enum Route: Hashable {
     case status(ThreadStatus)
     case thread(String)
     case recentCaptures
+    case screenshots
+    case screenshot(String)
     case settings
 }
 
@@ -270,6 +272,26 @@ final class AppModel {
         Task.detached(priority: .background) {
             _ = try? store.pruneAmbientActivity()
         }
+    }
+
+    /// Registers a data operation before it leaves the main actor. Delete all
+    /// waits for these jobs and refuses new ones until erasure completes.
+    @discardableResult
+    func startTrackedDataJob(
+        priority: TaskPriority = .userInitiated,
+        operation: @escaping @Sendable () async -> Void
+    ) -> Bool {
+        guard !isDeletingAllData else { return false }
+        let jobID = UUID()
+        dataJobs[jobID] = Task.detached(priority: priority) { [weak self] in
+            await operation()
+            await self?.finishTrackedDataJob(jobID)
+        }
+        return true
+    }
+
+    private func finishTrackedDataJob(_ id: UUID) {
+        dataJobs.removeValue(forKey: id)
     }
 
     /// Bumped after captures and imports so saved-note views refresh together.

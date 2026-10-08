@@ -17,7 +17,7 @@ struct SearchResultsView: View {
                         icon: "magnifyingglass",
                         title: "No matches for \"\(model.searchText)\"",
                         message: "Search covers thread titles, intents, next steps, blockers, "
-                            + "notes, page titles, URLs, repository names and agent names."
+                            + "notes, screenshots, page titles, URLs, repository names and agent names."
                     )
                 } else {
                     SectionHeader(title: "Results", count: model.searchResults.count)
@@ -70,6 +70,7 @@ struct SearchHitRow: View {
             switch hit.kind {
             case .memory: model.route = .memory(hit.recordId)
             case .place: model.route = .place(hit.recordId)
+            case .screenshot: model.route = .screenshot(hit.recordId)
             case .thread, .tab, .code, .note: model.route = .thread(hit.threadId)
             }
         }
@@ -83,6 +84,7 @@ struct SearchHitRow: View {
         case .note: "note.text"
         case .memory: "text.quote"
         case .place: "folder.badge.questionmark"
+        case .screenshot: "photo"
         }
     }
 }
