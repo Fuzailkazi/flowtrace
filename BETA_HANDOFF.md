@@ -4,9 +4,9 @@ Use this with scheduled participants in [BETA_STUDY.md](BETA_STUDY.md). It descr
 
 ## Exact candidate
 
-- Archive: `FlowTrace-0.1.1-build15-ad-hoc-macOS.zip`
-- SHA-256: `c9ce06678b96845f625df6264decaad8996da1cf46593b3a123b73aae1fe7fcf`
-- Source: merge commit `8f29a39` (PR #13). This build passed hosted macOS CI and the local app/CLI bundle checks.
+- Archive: `FlowTrace-0.1.1-build16-ad-hoc-macOS.zip`
+- SHA-256: `81f75ee5659a76fae69c14fee9d005039cefabb58809b8656865edafc48a918a`
+- Source: merge commit `7a20c58` (PR #17). Its PR head passed 387 local tests, a debug app build, and hosted macOS CI. This exact merge commit passed local app/CLI release bundle checks. Its post-merge `main` check is running as this handoff is prepared.
 - Requirement: macOS 14 or later. The archive is ad hoc signed; it is not Developer ID signed or notarized.
 
 The owner should send the exact archive privately to each scheduled participant and record the build ID. The current copy is in `~/Documents/FlowTrace Internal Builds/` on the build Mac. Do not substitute the v0.1.0 GitHub download: that version has no screenshot library.
@@ -25,7 +25,7 @@ The observer should let the participant find each action themselves and record a
 - Images, recognized text, descriptions, and other FlowTrace data stay on the Mac in a local database without encryption. There is no FlowTrace account, sync, or telemetry. The selected agent sources can read local transcript metadata and prompts; leave them off for a screenshot-only session.
 - **Settings → What FlowTrace knows → Export… → JSON with images…** saves image bytes with the data. **Markdown text only…** saves text and metadata without image bytes. A copied export needs the same care as the participant's screenshots.
 - To remove stored data, use **Settings → What FlowTrace knows → Delete everything…** and follow the app's confirmation. Then quit FlowTrace and move the app to Trash. Do this before removing the app if the participant wants to use its data controls.
-- For help, use the scheduled observer or [open a GitHub issue](https://github.com/Fuzailkazi/flowtrace/issues). Include macOS version, build 15, the action, and the exact error. Do not attach private screenshots, exports, or logs without reviewing their contents.
+- For help, use the scheduled observer or [open a GitHub issue](https://github.com/Fuzailkazi/flowtrace/issues). Include macOS version, build 16, the action, and the exact error. Do not attach private screenshots, exports, or logs without reviewing their contents.
 
 ## Stop and report
 
