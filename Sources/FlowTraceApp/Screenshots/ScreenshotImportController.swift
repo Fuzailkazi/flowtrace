@@ -35,15 +35,19 @@ final class ScreenshotImportController {
     }
 
     func paste(into model: AppModel) {
-        importImage(into: model) {
-            guard let data = NSPasteboard.general.data(forType: .png)
-                ?? NSPasteboard.general.data(forType: .tiff)
-                ?? NSPasteboard.general.data(forType: .init("public.jpeg"))
-            else {
-                throw ImportError.emptyClipboard
-            }
-            return data
+        guard !isImporting else { return }
+        // Capture the clipboard selection at click time. Reading it in the
+        // detached import job could save a different image if the user copies
+        // something else before that job starts.
+        guard let data = NSPasteboard.general.data(forType: .png)
+            ?? NSPasteboard.general.data(forType: .tiff)
+            ?? NSPasteboard.general.data(forType: .init("public.jpeg"))
+        else {
+            success = nil
+            error = ImportError.emptyClipboard.localizedDescription
+            return
         }
+        importImage(into: model) { data }
     }
 
     private func importImage(into model: AppModel, read: @escaping @Sendable () throws -> Data) {
