@@ -19,6 +19,7 @@ public struct ScreenshotExport: Codable, Sendable {
     public let ocrText: String
     public let ocrStatus: ScreenshotOCRStatus
     public let imageMIMEType: String
+    public let thumbnailData: Data
     public let imageData: Data
 }
 
@@ -29,20 +30,38 @@ extension Store {
     /// derived state, not the user's own data.
     public func exportAll() throws -> ExportBundle {
         try database.writer.read { db in
-            ExportBundle(
-                exportedAt: Date(),
-                threads: try WorkThread.order(WorkThread.Columns.updatedAt.desc).fetchAll(db),
-                browserContexts: try BrowserContext.fetchAll(db),
-                codeContexts: try CodeContext.fetchAll(db),
-                notes: try Note.fetchAll(db),
-                timeline: try TimelineEvent.fetchAll(db),
-                screenshots: []
-            )
+            var bundle = try Self.exportBase(db)
+            bundle.screenshots = try Row.fetchAll(db, sql: "SELECT * FROM screenshotMemory ORDER BY importedAt DESC, id DESC")
+                .map(Self.exportScreenshot)
+            return bundle
         }
     }
 
-    /// Writes a complete JSON export one screenshot at a time. At most one
-    /// image and its base64 encoding are held in memory during the image pass.
+    private static func exportBase(_ db: Database) throws -> ExportBundle {
+        ExportBundle(
+            exportedAt: Date(),
+            threads: try WorkThread.order(WorkThread.Columns.updatedAt.desc).fetchAll(db),
+            browserContexts: try BrowserContext.fetchAll(db),
+            codeContexts: try CodeContext.fetchAll(db),
+            notes: try Note.fetchAll(db),
+            timeline: try TimelineEvent.fetchAll(db),
+            screenshots: []
+        )
+    }
+
+    private static func exportScreenshot(_ row: Row) throws -> ScreenshotExport {
+        let rawStatus: String = row["ocrStatus"]
+        guard let status = ScreenshotOCRStatus(rawValue: rawStatus) else {
+            throw ScreenshotStoreError.invalidOCRStatus
+        }
+        return ScreenshotExport(id: row["id"], importedAt: row["importedAt"],
+            description: row["description"], ocrText: row["ocrText"], ocrStatus: status,
+            imageMIMEType: row["imageMIMEType"], thumbnailData: row["thumbnailData"],
+            imageData: row["imageData"])
+    }
+
+    /// Writes a point-in-time JSON export one screenshot at a time. The
+    /// non-image records and one image plus its base64 encoding are in memory.
     public func exportJSON(to destination: URL) throws {
         let temporary = destination.deletingLastPathComponent()
             .appendingPathComponent(".flowtrace-export-\(UUID().uuidString).tmp")
@@ -52,29 +71,24 @@ extension Store {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             encoder.dateEncodingStrategy = .iso8601
-            let base = try encoder.encode(exportAll())
-            // Replace the empty screenshot array with an incrementally written one.
-            let marker = Data("\"screenshots\":[]".utf8)
-            guard let range = base.range(of: marker) else { throw ExportError.invalidEnvelope }
-            try handle.write(contentsOf: base[..<range.lowerBound])
-            try handle.write(contentsOf: Data("\"screenshots\":[".utf8))
-            var first = true
-            let count = try screenshotCount()
-            for offset in stride(from: 0, to: count, by: 25) {
-                let page = try screenshots(limit: 25, offset: offset)
-                for metadata in page {
-                    guard let item = try screenshot(id: metadata.id) else { continue }
+            // One database read transaction gives the envelope and every image
+            // the same point-in-time snapshot, even if another process writes.
+            try database.writer.read { db in
+                let base = try encoder.encode(Self.exportBase(db))
+                let marker = Data("\"screenshots\":[]".utf8)
+                guard let range = base.range(of: marker) else { throw ExportError.invalidEnvelope }
+                try handle.write(contentsOf: base[..<range.lowerBound])
+                try handle.write(contentsOf: Data("\"screenshots\":[".utf8))
+                let cursor = try Row.fetchCursor(db, sql: "SELECT * FROM screenshotMemory ORDER BY importedAt DESC, id DESC")
+                var first = true
+                while let row = try cursor.next() {
                     if !first { try handle.write(contentsOf: Data(",".utf8)) }
                     first = false
-                    let entry = ScreenshotExport(id: item.id, importedAt: item.importedAt,
-                        description: item.description, ocrText: item.ocrText,
-                        ocrStatus: item.ocrStatus, imageMIMEType: item.imageMIMEType,
-                        imageData: item.imageData)
-                    try handle.write(contentsOf: encoder.encode(entry))
+                    try handle.write(contentsOf: encoder.encode(Self.exportScreenshot(row)))
                 }
+                try handle.write(contentsOf: Data("]".utf8))
+                try handle.write(contentsOf: base[range.upperBound...])
             }
-            try handle.write(contentsOf: Data("]".utf8))
-            try handle.write(contentsOf: base[range.upperBound...])
             try handle.close()
             if FileManager.default.fileExists(atPath: destination.path) {
                 _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
@@ -99,7 +113,7 @@ extension Store {
 
     /// A readable Markdown rendering, for keeping outside FlowTrace.
     public func exportMarkdown() throws -> String {
-        let bundle = try exportAll()
+        let bundle = try database.writer.read { db in try Self.exportBase(db) }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
 

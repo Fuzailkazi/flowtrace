@@ -85,6 +85,9 @@ func runScreenshotTests() {
         expectEqual(holdings.screenshots, 1)
         expectEqual(holdings.isEmpty, false)
 
+        expectEqual(try store.exportAll().screenshots.first?.imageData, image)
+        expectEqual(try store.exportAll().screenshots.first?.thumbnailData, Data([9]))
+
         let json = try store.exportJSON()
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -101,6 +104,28 @@ func runScreenshotTests() {
         expectEqual(try store.holdings().screenshots, 0)
         expectEqual(try store.search("secret diagram text").count, 0)
         expectNil(try store.screenshot(id: saved.id))
+    }
+
+    TestKit.test("streamed JSON export preserves every screenshot across pages") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        var expected: [String: Data] = [:]
+        for number in 0..<54 {
+            let image = Data([UInt8(number), 0, 255])
+            let item = try store.createScreenshot(imageData: image, thumbnailData: Data([UInt8(number)]),
+                description: "Image \(number)", importedAt: Date(timeIntervalSince1970: Double(number)))
+            expected[item.id] = image
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("flowtrace-screenshot-export-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try store.exportJSON(to: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let bundle = try decoder.decode(ExportBundle.self, from: Data(contentsOf: url))
+        expectEqual(bundle.screenshots.count, expected.count)
+        expectEqual(Set(bundle.screenshots.map(\.id)).count, expected.count)
+        for item in bundle.screenshots {
+            expectEqual(item.imageData, expected[item.id])
+        }
     }
 
     TestKit.test("processor rejects unreadable, oversized, and excessive pixel images") {

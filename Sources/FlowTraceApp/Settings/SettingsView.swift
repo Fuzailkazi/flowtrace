@@ -903,7 +903,7 @@ struct SettingsView: View {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let store = model.store
-        Task.detached(priority: .userInitiated) {
+        guard model.startTrackedDataJob(operation: {
             do {
                 if markdown {
                     try Data(store.exportMarkdown().utf8).write(to: url, options: .atomic)
@@ -914,6 +914,9 @@ struct SettingsView: View {
             } catch {
                 await MainActor.run { model.toast = Toast(message: "Export failed: \(error.localizedDescription)", isError: true) }
             }
+        }) else {
+            model.toast = Toast(message: "Export is unavailable while deleting data", isError: true)
+            return
         }
     }
 
