@@ -789,7 +789,10 @@ struct SettingsView: View {
                         Button("Forget today") {
                             forgetToday()
                         }
-                        Button("Export first…") { export(markdown: false) }
+                        Menu("Export…") {
+                            Button("JSON with images…") { export(markdown: false) }
+                            Button("Markdown text only…") { export(markdown: true) }
+                        }
                         Spacer()
                         Button("Delete everything…", role: .destructive) {
                             confirmingDeleteAll = true
