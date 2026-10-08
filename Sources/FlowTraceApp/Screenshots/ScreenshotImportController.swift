@@ -52,7 +52,7 @@ final class ScreenshotImportController {
         success = nil
         isImporting = true
         let store = model.store
-        Task.detached(priority: .userInitiated) {
+        let started = model.startTrackedDataJob(priority: .userInitiated) {
             let result = Result {
                 let input = try read()
                 guard input.count <= 25_000_000 else { throw ScreenshotImageError.inputTooLarge }
@@ -73,6 +73,10 @@ final class ScreenshotImportController {
                     self.error = "Could not save image: \(failure.localizedDescription)"
                 }
             }
+        }
+        if !started {
+            isImporting = false
+            error = "Cannot import while FlowTrace is deleting stored data. Try again when deletion finishes."
         }
     }
 }
