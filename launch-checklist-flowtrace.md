@@ -19,7 +19,7 @@
 - [ ] Recruit 8 to 10 target users who were not involved in building the app; record their current screenshot retrieval method without collecting their images. **Owner:** Product owner. **Blocking:** Yes for the observed beta.
 - [ ] Schedule a 30 minute first run and seven day follow up using [BETA_STUDY.md](BETA_STUDY.md). **Owner:** Product owner. **Blocking:** Yes for the observed beta.
 - [x] Prepare install, privacy, support, and data deletion instructions for the exact archive participants receive in [BETA_HANDOFF.md](BETA_HANDOFF.md). **Owner:** Product owner. **Blocking:** Yes. Confirm the same archive and checksum at handoff.
-- [ ] Keep the current public v0.1.0 asset intact as rollback and draft release notes that distinguish deliberate screenshot saving from background capture. **Owner:** Engineering and product owner. **Blocking:** Yes.
+- [x] Keep the current public v0.1.0 asset intact as rollback and draft release notes that distinguish deliberate screenshot saving from background capture in [RELEASE_NOTES_0.1.1_DRAFT.md](RELEASE_NOTES_0.1.1_DRAFT.md). The v0.1.0 asset was present at this check; keep it available through the new release. **Owner:** Engineering and product owner. **Blocking:** Yes.
 
 ## Session day (T-0)
 
