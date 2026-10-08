@@ -126,6 +126,10 @@ func runScreenshotTests() {
         for item in bundle.screenshots {
             expectEqual(item.imageData, expected[item.id])
         }
+        let markdown = try store.exportMarkdown()
+        expectEqual(markdown.components(separatedBy: "### Screenshot ").count - 1, expected.count)
+        for id in expected.keys { expectContains(markdown, "### Screenshot \(id)") }
+        expectNotContains(markdown, Data([0, 0, 255]).base64EncodedString())
     }
 
     TestKit.test("processor rejects unreadable, oversized, and excessive pixel images") {

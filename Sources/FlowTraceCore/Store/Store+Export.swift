@@ -113,70 +113,83 @@ extension Store {
 
     /// A readable Markdown rendering, for keeping outside FlowTrace.
     public func exportMarkdown() throws -> String {
-        let bundle = try database.writer.read { db in try Self.exportBase(db) }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
+        try database.writer.read { db in
+            let bundle = try Self.exportBase(db)
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
 
-        var out = "# FlowTrace export\n\n_\(formatter.string(from: bundle.exportedAt))_\n\n"
+            var out = "# FlowTrace export\n\n_\(formatter.string(from: bundle.exportedAt))_\n\n"
 
-        for thread in bundle.threads {
-            out += "## \(thread.title)\n\n"
-            out += "- **Status:** \(thread.status.label) · **Priority:** \(thread.priority.label)\n"
-            if !thread.intent.isEmpty { out += "- **Why:** \(thread.intent)\n" }
-            if !thread.nextStep.isEmpty { out += "- **Next step:** \(thread.nextStep)\n" }
-            if let blocker = thread.blocker, !blocker.isEmpty { out += "- **Blocked by:** \(blocker)\n" }
-            if !thread.tags.isEmpty { out += "- **Tags:** \(thread.tags.joined(separator: ", "))\n" }
-            out += "- **Created:** \(formatter.string(from: thread.createdAt))\n\n"
+            for thread in bundle.threads {
+                out += "## \(thread.title)\n\n"
+                out += "- **Status:** \(thread.status.label) · **Priority:** \(thread.priority.label)\n"
+                if !thread.intent.isEmpty { out += "- **Why:** \(thread.intent)\n" }
+                if !thread.nextStep.isEmpty { out += "- **Next step:** \(thread.nextStep)\n" }
+                if let blocker = thread.blocker, !blocker.isEmpty { out += "- **Blocked by:** \(blocker)\n" }
+                if !thread.tags.isEmpty { out += "- **Tags:** \(thread.tags.joined(separator: ", "))\n" }
+                out += "- **Created:** \(formatter.string(from: thread.createdAt))\n\n"
 
-            let repositories = bundle.codeContexts.filter { $0.workThreadId == thread.id }
-            if !repositories.isEmpty {
-                out += "### Repositories\n\n"
-                for context in repositories {
-                    out += "- `\(context.repositoryPath)`"
-                    if let branch = context.branch { out += " · \(branch)" }
-                    if let agent = context.agentName { out += " · \(agent.label)" }
-                    if !context.note.isEmpty { out += " — \(context.note)" }
+                let repositories = bundle.codeContexts.filter { $0.workThreadId == thread.id }
+                if !repositories.isEmpty {
+                    out += "### Repositories\n\n"
+                    for context in repositories {
+                        out += "- `\(context.repositoryPath)`"
+                        if let branch = context.branch { out += " · \(branch)" }
+                        if let agent = context.agentName { out += " · \(agent.label)" }
+                        if !context.note.isEmpty { out += " — \(context.note)" }
+                        out += "\n"
+                    }
                     out += "\n"
                 }
-                out += "\n"
-            }
 
-            let tabs = bundle.browserContexts.filter { $0.workThreadId == thread.id }
-            if !tabs.isEmpty {
-                out += "### Tabs\n\n"
-                for tab in tabs {
-                    out += "- [\(tab.pageTitle)](\(tab.url))"
-                    if !tab.note.isEmpty { out += " — \(tab.note)" }
+                let tabs = bundle.browserContexts.filter { $0.workThreadId == thread.id }
+                if !tabs.isEmpty {
+                    out += "### Tabs\n\n"
+                    for tab in tabs {
+                        out += "- [\(tab.pageTitle)](\(tab.url))"
+                        if !tab.note.isEmpty { out += " — \(tab.note)" }
+                        out += "\n"
+                    }
                     out += "\n"
                 }
-                out += "\n"
-            }
 
-            let notes = bundle.notes.filter { $0.workThreadId == thread.id }
-            if !notes.isEmpty {
-                out += "### Notes\n\n"
-                for note in notes {
-                    out += "- \(note.isDecision ? "**Decision:** " : "")\(note.content)\n"
-                }
-                out += "\n"
-            }
-        }
-        let count = try screenshotCount()
-        if count > 0 {
-            out += "## Screenshots\n\n"
-            out += "Image bytes are included in the JSON export; this Markdown export contains text only.\n\n"
-            for offset in stride(from: 0, to: count, by: 50) {
-                for item in try screenshots(limit: 50, offset: offset) {
-                    out += "### Screenshot \(item.id)\n\n"
-                    out += "- **Imported:** \(formatter.string(from: item.importedAt))\n"
-                    out += "- **Description:** \(item.description)\n"
-                    out += "- **OCR status:** \(item.ocrStatus.rawValue)\n"
-                    out += "- **Image type:** \(item.imageMIMEType)\n"
-                    out += "- **Recognized text:** \(item.ocrText)\n\n"
+                let notes = bundle.notes.filter { $0.workThreadId == thread.id }
+                if !notes.isEmpty {
+                    out += "### Notes\n\n"
+                    for note in notes {
+                        out += "- \(note.isDecision ? "**Decision:** " : "")\(note.content)\n"
+                    }
+                    out += "\n"
                 }
             }
+            // Keep the text export on one database snapshot. The projection omits
+            // imageData and thumbnailData, so listing cannot load image blobs.
+            let screenshots = try Row.fetchCursor(db, sql: """
+                SELECT id, importedAt, description, ocrText, ocrStatus, imageMIMEType
+                FROM screenshotMemory ORDER BY importedAt DESC, id DESC
+                """)
+            var wroteHeader = false
+            while let item = try screenshots.next() {
+                if !wroteHeader {
+                    out += "## Screenshots\n\n"
+                    out += "Image bytes are included in the JSON export; this Markdown export contains text only.\n\n"
+                    wroteHeader = true
+                }
+                let id: String = item["id"]
+                let importedAt: Date = item["importedAt"]
+                let description: String = item["description"]
+                let ocrStatus: String = item["ocrStatus"]
+                let imageMIMEType: String = item["imageMIMEType"]
+                let ocrText: String = item["ocrText"]
+                out += "### Screenshot \(id)\n\n"
+                out += "- **Imported:** \(formatter.string(from: importedAt))\n"
+                out += "- **Description:** \(description)\n"
+                out += "- **OCR status:** \(ocrStatus)\n"
+                out += "- **Image type:** \(imageMIMEType)\n"
+                out += "- **Recognized text:** \(ocrText)\n\n"
+            }
+            return out
         }
-        return out
     }
 
     /// Removes everything.
