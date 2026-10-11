@@ -17,14 +17,14 @@ FlowTrace shows the coding agents, local servers, and repositories still active 
 your Mac, alongside notes you chose to save. It helps you recover where work
 stopped without remembering which repository or agent session to open first.
 
-The current source also includes a deliberate screenshot library: paste or import an image,
-recognize text locally, search its words or your description, and reopen or delete it.
-FlowTrace does not take screenshots in the background. This feature is still being
-validated and is not in the published download.
+The current release stores notes and work context for local retrieval.
 
-Everything is stored on your Mac without encryption. Screenshot images and recognized
-text stay local. JSON export includes the image bytes; Markdown export contains screenshot
-text and metadata only. FlowTrace does not require an account or a cloud backend.
+Images saved with earlier internal builds remain in the local database. They
+are included in JSON export and removed by **Delete everything** in Settings.
+The app no longer offers image import, browsing, OCR, or image search.
+
+Everything is stored on your Mac. FlowTrace does not require an account or a cloud
+backend.
 
 ## Download and install
 
@@ -35,7 +35,7 @@ text and metadata only. FlowTrace does not require an account or a cloud backend
 3. Unzip it and move `FlowTrace.app` to `/Applications`.
 4. Open FlowTrace from Applications.
 
-The published test build is ad-hoc signed for local distribution. If macOS blocks the
+The current release is ad-hoc signed for local distribution. If macOS blocks the
 first launch, right-click `FlowTrace.app`, choose **Open**, and confirm. If macOS
 still reports that the app cannot be opened, run:
 
@@ -43,9 +43,9 @@ still reports that the app cannot be opened, run:
 xattr -dr com.apple.quarantine /Applications/FlowTrace.app
 ```
 
-Then open FlowTrace again. This older technical test build does not include screenshot
-recall. A new release needs full screenshot validation, a clean-account
-walkthrough, Developer ID signing, and notarization before it is ready to share.
+Then open FlowTrace again. The current download is suitable for a technical beta;
+a Developer ID signed and notarized build is still needed for a smooth public
+installation.
 
 ### Build it yourself
 
@@ -98,10 +98,10 @@ you do not want it observed.
 ### Capture a memory
 
 Press the configured Quick Capture shortcut (the default is `⌥ Space`) from any
-app. Choose one of these capture modes:
+app to write a note:
 
-- **Quick Capture** — writes a note with the surrounding app, window, browser,
-  URL, and project context when available. No screenshot is taken.
+Quick Capture saves the surrounding app, window, browser, URL, and project
+context when available.
 
 ### See what is happening now
 

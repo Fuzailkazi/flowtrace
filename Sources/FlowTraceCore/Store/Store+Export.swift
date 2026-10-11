@@ -17,7 +17,7 @@ public struct ScreenshotExport: Codable, Sendable {
     public let importedAt: Date
     public let description: String
     public let ocrText: String
-    public let ocrStatus: ScreenshotOCRStatus
+    public let ocrStatus: String
     public let imageMIMEType: String
     public let thumbnailData: Data
     public let imageData: Data
@@ -50,12 +50,8 @@ extension Store {
     }
 
     private static func exportScreenshot(_ row: Row) throws -> ScreenshotExport {
-        let rawStatus: String = row["ocrStatus"]
-        guard let status = ScreenshotOCRStatus(rawValue: rawStatus) else {
-            throw ScreenshotStoreError.invalidOCRStatus
-        }
         return ScreenshotExport(id: row["id"], importedAt: row["importedAt"],
-            description: row["description"], ocrText: row["ocrText"], ocrStatus: status,
+            description: row["description"], ocrText: row["ocrText"], ocrStatus: row["ocrStatus"],
             imageMIMEType: row["imageMIMEType"], thumbnailData: row["thumbnailData"],
             imageData: row["imageData"])
     }

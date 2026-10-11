@@ -7,9 +7,8 @@ listeners FlowTrace can identify, understand which project each belongs to,
 open one in a browser, or deliberately stop one. This is a supporting “what
 was running?” work-context surface, not a server-management dashboard.
 
-Screenshot capture and retrieval remain part of the same work-memory product:
-screenshots will live with their app, window, project, time, and activity context
-and be browsed from Memories. This feature does not change that direction.
+This is a historical design note. The screenshot direction mentioned in its
+original draft was removed on 11 October 2026.
 
 ## Entry point and information architecture
 
@@ -78,7 +77,7 @@ and be browsed from Memories. This feature does not change that direction.
 - Port scanning, health checks, HTTP metadata inspection, or service probing.
 - Listing listeners whose process working directory is outside the user's home
   folder or cannot be read.
-- Reorganizing screenshot capture, Memories, or the main product navigation.
+- Reorganizing Memories or the main product navigation.
 
 ## Acceptance criteria
 

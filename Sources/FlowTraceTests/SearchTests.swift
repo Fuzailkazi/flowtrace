@@ -87,4 +87,26 @@ func runSearchTests() {
         _ = try store.update(thread)
         expect(try !store.search("kubernetes").isEmpty, "after edit")
     }
+
+    TestKit.test("older saved images remain exportable but are absent from search") {
+        let store = try Store(database: FlowTraceDatabase.inMemory())
+        let image = Data([0, 1, 254, 255])
+        try store.database.writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO screenshotMemory
+                    (id, importedAt, description, ocrText, ocrStatus, imageMIMEType, thumbnailData, imageData)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: ["legacy-image", Date(), "Old drawing", "legacy image clue",
+                                  "succeeded", "image/jpeg", Data([1]), image])
+            try db.execute(sql: """
+                INSERT INTO searchIndex (kind, recordId, threadId, title, body)
+                VALUES ('screenshot', 'legacy-image', '', 'Old drawing', 'legacy image clue')
+                """)
+        }
+        expectEqual(try store.search("legacy image clue").count, 0)
+        expectEqual(try store.holdings().screenshots, 1)
+        expectEqual(try store.exportAll().screenshots.first?.imageData, image)
+        try store.deleteAllData()
+        expectEqual(try store.holdings().screenshots, 0)
+    }
 }

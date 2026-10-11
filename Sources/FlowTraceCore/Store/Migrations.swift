@@ -241,6 +241,12 @@ enum Migrations {
             try db.create(index: "idx_screenshot_imported", on: "screenshotMemory", columns: ["importedAt"])
         }
 
+        // Keep images saved by older builds available to export or erase, but
+        // remove their search entries now that the library is gone.
+        migrator.registerMigration("v10.removeScreenshotSearch") { db in
+            try db.execute(sql: "DELETE FROM searchIndex WHERE kind = 'screenshot'")
+        }
+
         return migrator
     }
 }

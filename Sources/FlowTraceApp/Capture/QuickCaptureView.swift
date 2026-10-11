@@ -158,9 +158,7 @@ struct QuickCaptureView: View {
 
     // MARK: - Where you are
 
-    /// The design shows a captured frame here. FlowTrace takes no screenshots,
-    /// so the slot holds what it actually knows about where you are: the page
-    /// or window, the address, the project — on the same dark card.
+    /// The card shows the available page or window, address, and project context.
     private var contextCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {

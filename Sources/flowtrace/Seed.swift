@@ -2,7 +2,7 @@ import Foundation
 import ArgumentParser
 import FlowTraceCore
 
-/// Fills a database with realistic threads for development and screenshots.
+/// Fills a database with realistic threads for development and previews.
 ///
 /// Writes to a throwaway file by default so it can never land on top of real
 /// work; `--into-real-database` is the deliberate opt-in.
