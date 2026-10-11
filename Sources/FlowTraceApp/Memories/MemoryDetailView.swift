@@ -5,8 +5,7 @@ import FlowTraceCore
 /// One memory in full: what you were looking at, what you wrote about it, and
 /// what was happening on either side.
 ///
-/// The design led with a screenshot. FlowTrace never takes one, so the hero is
-/// the context we actually have — app, title, address, when and for how long.
+/// The context card shows the app, title, address, when and for how long.
 struct MemoryDetailView: View {
     @Bindable var model: AppModel
     let eventId: String

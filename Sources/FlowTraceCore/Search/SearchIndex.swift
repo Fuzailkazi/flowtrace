@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 
 public enum SearchKind: String, Codable, Sendable {
-    case thread, tab, code, note, screenshot
+    case thread, tab, code, note
     /// A note the user wrote on something they were doing. What the Memories
     /// screen shows, and the thing people mean when they say "my notes".
     case memory
@@ -15,7 +15,7 @@ public enum SearchKind: String, Codable, Sendable {
     public var navigatesByThread: Bool {
         switch self {
         case .thread, .tab, .code, .note: true
-        case .memory, .place, .screenshot: false
+        case .memory, .place: false
         }
     }
 }
@@ -107,16 +107,12 @@ public enum SearchIndex {
         try search(db, query: query, limit: limit, onlyMemories: true)
     }
 
-    public static func searchScreenshots(_ db: Database, query: String, limit: Int = 50) throws -> [SearchHit] {
-        try search(db, query: query, limit: limit, onlyMemories: false, onlyScreenshots: true)
-    }
-
     private static func search(
-        _ db: Database, query: String, limit: Int, onlyMemories: Bool, onlyScreenshots: Bool = false
+        _ db: Database, query: String, limit: Int, onlyMemories: Bool
     ) throws -> [SearchHit] {
         let terms = searchTerms(in: query)
         guard !terms.isEmpty else { return [] }
-        let scope = onlyScreenshots ? "AND kind = 'screenshot'" : (onlyMemories ? "AND kind IN ('memory', 'place')" : "")
+        let scope = onlyMemories ? "AND kind IN ('memory', 'place')" : "AND kind != 'screenshot'"
 
         let complete = try rankedMatches(
             db, expression: ftsExpression(tokens: terms, joiningWith: " AND "),

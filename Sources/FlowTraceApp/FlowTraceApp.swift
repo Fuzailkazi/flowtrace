@@ -198,15 +198,13 @@ struct RootView: View {
                model.thread(id: requested) != nil {
                 model.route = .thread(requested)
             }
-            // Development only: open on a given screen, so each one can be
-            // launched and screenshotted without clicking through. Never set
-            // by the app itself; harmless when absent.
+            // Development only: open on a given screen for UI review without
+            // clicking through. Never set by the app itself; harmless when absent.
             if let requested = ProcessInfo.processInfo.environment["FLOWTRACE_OPEN_ROUTE"] {
                 switch requested {
                 case "now": model.route = .now
                 case "timeline": model.route = .timeline
                 case "memories": model.route = .memories
-                case "screenshots": model.route = .screenshots
                 case "settings": model.route = .settings
                 case "capture":
                     // Summon the panel a beat after launch, as the key would.
@@ -256,7 +254,7 @@ struct RootView: View {
     }
 
     /// Development only: `FLOWTRACE_SKIP_ONBOARDING=1` keeps the first-run sheet
-    /// down for this process so screens can be screenshotted. Nothing is saved;
+    /// down for this process during UI review. Nothing is saved;
     /// the next normal launch shows the sheet again.
     private static var devSkipsOnboarding: Bool {
         ProcessInfo.processInfo.environment["FLOWTRACE_SKIP_ONBOARDING"] == "1"
@@ -328,7 +326,6 @@ struct MainWindow: View {
                 Button("Now") { model.route = .now }
                 Button("Timeline") { model.route = .timeline }
                 Button("Memories") { model.route = .memories }
-                Button("Screenshots") { model.route = .screenshots }
                 Divider()
                 Button("Unfinished work") { model.route = .dashboard }
                 Button("All threads") { model.route = .status(.active) }
@@ -361,10 +358,6 @@ struct DetailPane: View {
                 TimelineView(model: model)
             case .memories:
                 MemoriesView(model: model)
-            case .screenshots:
-                ScreenshotLibraryView(model: model)
-            case .screenshot(let id):
-                ScreenshotDetailView(model: model, id: id)
             case .memory(let id):
                 MemoryDetailView(model: model, eventId: id)
             case .place(let path):

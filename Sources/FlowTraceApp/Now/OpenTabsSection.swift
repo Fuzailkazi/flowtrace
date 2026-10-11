@@ -7,9 +7,7 @@ import FlowTraceCore
 /// because "what am I in the middle of" spans both: a repository with an idle
 /// agent and eleven tabs about the same problem are one situation.
 ///
-/// Laid out as the design's "you were here recently" grid, minus the
-/// screenshots: FlowTrace reads tab titles and addresses, not pixels, so each
-/// card shows the title, the host, and what you said the page was for.
+/// Each card shows the tab title, host, and what you said the page was for.
 ///
 /// A note written here is keyed on the page's address, not on the tab — so it
 /// survives the tab closing, which is the entire point of asking.

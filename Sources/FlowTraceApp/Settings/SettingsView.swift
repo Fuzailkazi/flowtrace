@@ -731,10 +731,12 @@ struct SettingsView: View {
                                 "Agent sessions", holdings.agentSessions,
                                 "Read from transcripts your agents wrote."
                             )
-                            holdingRow(
-                                "Screenshots", holdings.screenshots,
-                                "Images you chose to save, with local recognized text."
-                            )
+                            if holdings.screenshots > 0 {
+                                holdingRow(
+                                    "Images from earlier builds", holdings.screenshots,
+                                    "Included in JSON export or removed by Delete everything."
+                                )
+                            }
                             holdingRow(
                                 "Project notes", holdings.projectNotes,
                                 "What you said you were building, per repository."
@@ -790,8 +792,8 @@ struct SettingsView: View {
                             forgetToday()
                         }
                         Menu("Export…") {
-                            Button("JSON with images…") { export(markdown: false) }
-                            Button("Markdown text only…") { export(markdown: true) }
+                            Button("JSON…") { export(markdown: false) }
+                            Button("Markdown…") { export(markdown: true) }
                         }
                         Spacer()
                         Button("Delete everything…", role: .destructive) {
@@ -805,7 +807,7 @@ struct SettingsView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Your saved screenshots, activity, and notes live in a local database without encryption. JSON export includes screenshot images; Markdown contains text only. The controls above also clear FlowTrace's log and server token.")
+                        Text("Your activity and notes live in a local database without encryption. Images saved by earlier builds remain there and are included in JSON export. The controls above also clear FlowTrace's log and server token.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                         HStack(spacing: Theme.Space.s) {
                             Text(FlowTraceDatabase.defaultURL.path)
